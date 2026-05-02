@@ -1,6 +1,8 @@
 import { Component } from "obsidian";
 import type ClaudeCodePlugin from "../main";
-import { ChatTurn, PermissionDecision, StreamEvent, ToolBlock } from "../types";
+import type { SessionRecord } from "../session/store";
+import type { ToolIndex } from "../session/toolIndex";
+import { ChatTurn, PermissionDecision, StreamEvent, ToolStatus } from "../types";
 import { MarkdownStream } from "./markdownStream";
 import { ToolCard } from "./toolCard";
 
@@ -10,6 +12,7 @@ export interface TranscriptCallbacks {
 
 interface AssistantTurnContext {
 	turn: ChatTurn;
+	turnIndex: number;
 	containerEl: HTMLElement;
 	currentBubble: TextBubble | null;
 }
@@ -25,11 +28,13 @@ export class TranscriptView {
 	/** All tool cards across the entire transcript, indexed by tool_use_id. */
 	private toolCards = new Map<string, ToolCard>();
 	private active: AssistantTurnContext | null = null;
+	private recordRef: (() => SessionRecord | null) | null = null;
 
 	constructor(
 		private plugin: ClaudeCodePlugin,
 		private parent: Component,
 		container: HTMLElement,
+		private toolIndex: ToolIndex,
 		private callbacks: TranscriptCallbacks
 	) {
 		this.container = container;
@@ -38,7 +43,13 @@ export class TranscriptView {
 	clear(): void {
 		this.container.empty();
 		this.toolCards.clear();
+		this.toolIndex.clear();
 		this.active = null;
+	}
+
+	/** Provide a getter for the active SessionRecord so block lookups can resolve across turns. */
+	bindRecordRef(ref: (() => SessionRecord | null) | null): void {
+		this.recordRef = ref;
 	}
 
 	scrollToBottom(): void {
@@ -67,9 +78,9 @@ export class TranscriptView {
 		this.scrollToBottom();
 	}
 
-	beginAssistantTurn(turn: ChatTurn): void {
+	beginAssistantTurn(turn: ChatTurn, turnIndex: number): void {
 		const turnEl = this.container.createDiv({ cls: ["cc-turn", "cc-turn--assistant"] });
-		this.active = { turn, containerEl: turnEl, currentBubble: null };
+		this.active = { turn, turnIndex, containerEl: turnEl, currentBubble: null };
 		this.scrollToBottom();
 	}
 
@@ -124,7 +135,10 @@ export class TranscriptView {
 	}
 
 	private appendToolUse(toolUseId: string, tool: string, input: unknown): void {
-		if (!this.active) return;
+		if (!this.active) {
+			console.warn("[claude-code] appendToolUse with no active turn", { toolUseId, tool });
+			return;
+		}
 		// New tool starts a new bubble for any subsequent text.
 		this.active.currentBubble = null;
 		const card = new ToolCard(this.active.containerEl, {
@@ -135,28 +149,48 @@ export class TranscriptView {
 			status: "running",
 		});
 		this.toolCards.set(toolUseId, card);
-		this.active.turn.blocks.push({
+		const blocks = this.active.turn.blocks;
+		blocks.push({
 			type: "tool",
 			toolUseId,
 			tool,
 			input,
 			status: "running",
 		});
+		this.toolIndex.register(toolUseId, {
+			turnIndex: this.active.turnIndex,
+			blockIndex: blocks.length - 1,
+		});
 		this.scrollToBottom();
 	}
 
 	private applyToolResult(toolUseId: string, content: string, isError: boolean): void {
-		const card = this.toolCards.get(toolUseId);
+		let card = this.toolCards.get(toolUseId);
+		const record = this.recordRef?.();
+		if (!card && record && this.active) {
+			// Defensive: a tool_result arriving for an id without a card means
+			// the tool_use event somehow didn't create one. If the block does
+			// exist in the record (so appendToolUse ran), lazily render the
+			// card now so the user sees the result.
+			const block = this.toolIndex.resolve(record, toolUseId);
+			if (block) {
+				console.warn("[claude-code] late tool_result without card, recovering", { toolUseId, tool: block.tool });
+				card = new ToolCard(this.active.containerEl, {
+					app: this.plugin.app,
+					toolUseId: block.toolUseId,
+					tool: block.tool,
+					input: block.input,
+					status: "running",
+				});
+				this.toolCards.set(toolUseId, card);
+			}
+		}
 		if (card) {
 			card.setOutput(content, isError);
 			card.setStatus(isError ? "error" : "ok");
 		}
-		// Find the block by id across all turns, not just the current one.
-		const block = this.findToolBlockGlobal(toolUseId);
-		if (block) {
-			block.status = isError ? "error" : "ok";
-			block.output = content;
-			block.isError = isError;
+		if (record) {
+			this.toolIndex.applyResult(record, toolUseId, content, isError);
 		}
 	}
 
@@ -173,6 +207,11 @@ export class TranscriptView {
 		if (!card) return;
 		card.el.remove();
 		this.toolCards.delete(toolUseId);
+	}
+
+	setToolCardStatus(toolUseId: string, status: ToolStatus): void {
+		const card = this.toolCards.get(toolUseId);
+		card?.setStatus(status);
 	}
 
 	markAborted(): void {
@@ -198,34 +237,39 @@ export class TranscriptView {
 		if (!this.active) return;
 		const blocks = this.active.turn.blocks;
 		const last = blocks[blocks.length - 1];
-		if (last && last.type === "text" && last.messageId === messageId) {
-			last.markdown += delta;
-		} else {
-			blocks.push({ type: "text", markdown: delta, messageId });
+		if (last && last.type === "text") {
+			// Partial-message stream events don't carry messageId, so deltas land
+			// with messageId="". When the real id arrives later, claim the running
+			// text block instead of starting a duplicate.
+			const sameId = last.messageId === messageId;
+			const promotable = !last.messageId && Boolean(messageId);
+			const continuing = !messageId;
+			if (sameId || promotable || continuing) {
+				if (promotable) last.messageId = messageId;
+				last.markdown += delta;
+				return;
+			}
 		}
+		blocks.push({ type: "text", markdown: delta, messageId });
 	}
 
 	private replaceTextBlockForMessage(text: string, messageId: string): void {
 		if (!this.active) return;
 		const blocks = this.active.turn.blocks;
+		// Walk backward but stop at the first non-text block — that bounds the
+		// current text run. Inside it, accept either the matching messageId or
+		// a placeholder block with an empty messageId (from partial streaming).
 		for (let i = blocks.length - 1; i >= 0; i--) {
 			const block = blocks[i];
-			if (block && block.type === "text" && block.messageId === messageId) {
+			if (!block) continue;
+			if (block.type !== "text") break;
+			if (block.messageId === messageId || !block.messageId) {
 				block.markdown = text;
+				block.messageId = messageId;
 				return;
 			}
 		}
 		blocks.push({ type: "text", markdown: text, messageId });
-	}
-
-	private findToolBlockGlobal(toolUseId: string): ToolBlock | null {
-		// Walk from the current turn outward; tool_use_id is unique per claude session.
-		if (this.active) {
-			for (const b of this.active.turn.blocks) {
-				if (b.type === "tool" && b.toolUseId === toolUseId) return b;
-			}
-		}
-		return null;
 	}
 
 	renderHistoricalTurns(turns: ChatTurn[]): void {

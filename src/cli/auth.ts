@@ -1,9 +1,10 @@
 import { ChildProcess, spawn } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { Notice, Platform } from "obsidian";
+import { Notice } from "obsidian";
 import { STDOUT_OAUTH_URL_PATTERN } from "../constants";
 import type ClaudeCodePlugin from "../main";
+import { getElectronShell } from "../utils/electron";
 import * as logger from "../utils/log";
 import { resolvePaths } from "../binary/paths";
 import { buildIsolatedEnv } from "./env";
@@ -27,20 +28,6 @@ function hasOauthAccount(configDir: string): boolean {
 	}
 }
 
-interface ElectronShell {
-	openExternal: (url: string) => Promise<void>;
-}
-
-function getElectronShell(): ElectronShell | null {
-	if (!Platform.isDesktopApp) return null;
-	try {
-		// eslint-disable-next-line @typescript-eslint/no-require-imports
-		const electron = require("electron") as { shell?: ElectronShell };
-		return electron?.shell ?? null;
-	} catch {
-		return null;
-	}
-}
 
 export type LoginPhase =
 	| "starting"
@@ -179,7 +166,7 @@ export class AuthManager {
 
 	private async openInBrowser(url: string): Promise<void> {
 		const shellApi = getElectronShell();
-		if (shellApi) {
+		if (shellApi?.openExternal) {
 			try {
 				await shellApi.openExternal(url);
 				return;
@@ -263,7 +250,8 @@ export class AuthManager {
 	}
 
 	private buildEnv(configDir: string): NodeJS.ProcessEnv {
-		return buildIsolatedEnv(configDir);
+		const paths = resolvePaths(this.plugin);
+		return buildIsolatedEnv({ configDir, tmpDir: paths.tmpDir });
 	}
 }
 

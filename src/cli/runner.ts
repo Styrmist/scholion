@@ -4,6 +4,7 @@ import { SendOptions, SendResult } from "../types";
 import * as logger from "../utils/log";
 import { wireAbort } from "./abort";
 import { buildIsolatedEnv } from "./env";
+import { resolvePaths } from "../binary/paths";
 import { normalize } from "./events";
 import { lineStream } from "./ndjson";
 
@@ -92,12 +93,14 @@ export class ClaudeRunner {
 			"stream-json",
 			"--verbose",
 			"--include-partial-messages",
+			"--include-hook-events",
 			"--settings",
 			opts.settingsJson,
 		];
 		if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
-		if (opts.allowedTools.length > 0) args.push("--allowedTools", opts.allowedTools.join(","));
-		if (opts.disallowedTools.length > 0) args.push("--disallowedTools", opts.disallowedTools.join(","));
+		// Permission lists are now consulted by the PreToolUse hook (HookServer)
+		// instead of being passed to the CLI directly. The CLI's `--allowedTools`
+		// would short-circuit the hook for matching tools, defeating interactivity.
 		if (opts.model) args.push("--model", opts.model);
 		if (opts.systemPromptAddendum && opts.systemPromptAddendum.trim()) {
 			args.push("--append-system-prompt", opts.systemPromptAddendum);
@@ -106,6 +109,7 @@ export class ClaudeRunner {
 	}
 
 	private buildEnv(configDir: string): NodeJS.ProcessEnv {
-		return buildIsolatedEnv(configDir);
+		const paths = resolvePaths(this.plugin);
+		return buildIsolatedEnv({ configDir, tmpDir: paths.tmpDir });
 	}
 }

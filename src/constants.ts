@@ -3,7 +3,6 @@ export const VIEW_TYPE_CHAT = "claude-code-chat";
 export const PLUGIN_DIR_BIN = "bin";
 export const PLUGIN_DIR_CONFIG = "config";
 export const PLUGIN_DIR_SESSIONS = "sessions";
-export const PLUGIN_DIR_TMP = "tmp";
 
 export const BINARY_NAME_UNIX = "claude";
 export const BINARY_NAME_WINDOWS = "claude.exe";
@@ -55,6 +54,23 @@ export const SESSION_SAVE_DEBOUNCE_MS = 500;
 export const TOOL_OUTPUT_PREVIEW_BYTES = 4096;
 export const PARTIAL_STALE_AGE_MS = 60_000;
 export const MAX_DIAGNOSTICS_PER_SESSION = 500;
+
+// Hook IPC: the hook script's inner timeout MUST be smaller than the CLI's outer
+// timeout, because the CLI fails OPEN on its timeout (would silently allow the
+// tool). The script's inner timeout fails DENY — that's the safe default if the
+// user doesn't respond.
+export const HOOK_SCRIPT_FILE_UNIX = "permissionHook.sh";
+export const HOOK_SCRIPT_FILE_WINDOWS = "permissionHook.ps1";
+export const HOOK_INNER_TIMEOUT_MS = 5 * 60_000;
+export const HOOK_OUTER_TIMEOUT_SEC = 600;
+export const HOOK_REQ_PREFIX = "hook-";
+export const HOOK_REQ_SUFFIX = ".req";
+export const HOOK_RESP_SUFFIX = ".resp";
+// IPC dir lives in system temp (per-vault subdir, sha256-hashed). Keeping it
+// outside the vault avoids iCloud/cloud-sync interference with the atomic
+// .tmp→.req rename: parallel writes were producing 11/12 ENOENT-on-read on
+// iCloud-synced vaults. See Hook IPC follow-ups in TODO.md.
+export const HOOK_IPC_DIR_PREFIX = "obsidian-claude-code-";
 
 export const DEFAULT_MAX_ATTACH_KB = 64;
 

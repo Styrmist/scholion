@@ -122,6 +122,18 @@ export type StreamEvent =
 			permissionDenied?: { tool: string; reason: string };
 	  }
 	| { kind: "api_retry"; attempt: number; maxRetries: number; retryDelayMs: number; errorStatus: number | null }
+	| { kind: "hook_started"; hookId: string; hookEvent: string; hookName: string; toolName?: string }
+	| {
+			kind: "hook_response";
+			hookId: string;
+			hookEvent: string;
+			hookName: string;
+			toolName?: string;
+			outcome: "success" | "cancelled";
+			exitCode: number;
+			stdout: string;
+			stderr: string;
+	  }
 	| { kind: "stderr"; line: string }
 	| { kind: "unknown"; raw: unknown };
 
@@ -131,8 +143,6 @@ export interface SendOptions {
 	binaryPath: string;
 	configDir: string;
 	resumeSessionId?: string;
-	allowedTools: string[];
-	disallowedTools: string[];
 	permissionMode: PermissionMode;
 	model?: string;
 	systemPromptAddendum?: string;

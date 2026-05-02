@@ -30,6 +30,34 @@ export function normalize(raw: unknown): StreamEvent[] {
 		}];
 	}
 
+	if (r.type === "system" && r.subtype === "hook_started") {
+		const hookName = stringField(r, "hook_name");
+		return [{
+			kind: "hook_started",
+			hookId: stringField(r, "hook_id"),
+			hookEvent: stringField(r, "hook_event"),
+			hookName,
+			toolName: parseToolFromHookName(hookName),
+		}];
+	}
+
+	if (r.type === "system" && r.subtype === "hook_response") {
+		const hookName = stringField(r, "hook_name");
+		const outcomeRaw = stringField(r, "outcome");
+		const outcome: "success" | "cancelled" = outcomeRaw === "cancelled" ? "cancelled" : "success";
+		return [{
+			kind: "hook_response",
+			hookId: stringField(r, "hook_id"),
+			hookEvent: stringField(r, "hook_event"),
+			hookName,
+			toolName: parseToolFromHookName(hookName),
+			outcome,
+			exitCode: numberField(r, "exit_code"),
+			stdout: stringField(r, "stdout"),
+			stderr: stringField(r, "stderr"),
+		}];
+	}
+
 	if (r.type === "stream_event") {
 		const event = r["event"] as { type?: string; delta?: { type?: string; text?: string }; index?: number } | undefined;
 		if (event && event.type === "content_block_delta" && event.delta?.type === "text_delta") {
@@ -188,4 +216,12 @@ function stringFieldOrUndefined(r: RawEvent, key: string): string | undefined {
 function numberField(r: RawEvent, key: string): number {
 	const v = r[key];
 	return typeof v === "number" ? v : 0;
+}
+
+// Hook names look like "PreToolUse:Bash" — extract the trailing tool name when present.
+function parseToolFromHookName(hookName: string): string | undefined {
+	const idx = hookName.indexOf(":");
+	if (idx < 0) return undefined;
+	const tail = hookName.slice(idx + 1).trim();
+	return tail.length > 0 ? tail : undefined;
 }

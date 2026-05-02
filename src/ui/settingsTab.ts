@@ -1,8 +1,10 @@
 import { App, Modal, Notice, PluginSettingTab, Setting } from "obsidian";
 import type ClaudeCodePlugin from "../main";
+import { resolvePaths } from "../binary/paths";
 import { LoginPhase } from "../cli/auth";
 import { VIEW_TYPE_CHAT } from "../constants";
 import { SendMethod } from "../types";
+import { getElectronShell } from "../utils/electron";
 import { ChatView } from "./view";
 import { confirm } from "./confirmModal";
 
@@ -336,6 +338,17 @@ export class ClaudeSettingsTab extends PluginSettingTab {
 				t.setValue(this.plugin.settings.verboseLogging).onChange(async (value) => {
 					this.plugin.settings.verboseLogging = value;
 					await this.plugin.saveSettings();
+				})
+			);
+
+		const paths = resolvePaths(this.plugin);
+		new Setting(containerEl)
+			.setName("Permission hook directory")
+			.setDesc(paths.tmpDir)
+			.addButton((b) =>
+				b.setButtonText("Show").onClick(() => {
+					const shellApi = getElectronShell();
+					if (shellApi?.openPath) void shellApi.openPath(paths.tmpDir);
 				})
 			);
 

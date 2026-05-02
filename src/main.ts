@@ -1,15 +1,19 @@
 import { promises as fsp } from "fs";
 import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
+import { join } from "path";
 import { BinaryInstaller } from "./binary/installer";
 import { resolvePaths } from "./binary/paths";
 import { AuthManager } from "./cli/auth";
 import { ClaudeRunner } from "./cli/runner";
 import { RIBBON_ICON, VIEW_TYPE_CHAT } from "./constants";
+import { installHookScript } from "./permissions/hookInstaller";
+import { HookServer } from "./permissions/hookServer";
 import { SessionStore } from "./session/store";
 import { DEFAULT_SETTINGS, PluginSettings } from "./settings";
 import { ChatView } from "./ui/view";
 import { ClaudeSettingsTab } from "./ui/settingsTab";
 import { ensureDir } from "./utils/fs";
+import * as logger from "./utils/log";
 import { setVerbose } from "./utils/log";
 
 export default class ClaudeCodePlugin extends Plugin {
@@ -18,6 +22,7 @@ export default class ClaudeCodePlugin extends Plugin {
 	runner!: ClaudeRunner;
 	sessions!: SessionStore;
 	auth!: AuthManager;
+	hookServer!: HookServer;
 
 	override async onload(): Promise<void> {
 		await this.loadSettings();
@@ -26,8 +31,14 @@ export default class ClaudeCodePlugin extends Plugin {
 		this.runner = new ClaudeRunner(this);
 		this.sessions = new SessionStore(this);
 		this.auth = new AuthManager(this);
+		this.hookServer = new HookServer(this);
 
 		this.ensurePluginDirs();
+		this.migrateLegacyTmpDir();
+		void installHookScript(resolvePaths(this).hookScriptPath).catch((e) => {
+			logger.error("failed to install hook script", e);
+		});
+		this.hookServer.start();
 
 		this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
 
@@ -56,6 +67,7 @@ export default class ClaudeCodePlugin extends Plugin {
 	}
 
 	onunload(): void {
+		this.hookServer?.stop();
 		this.runner.killAll();
 		this.sessions.flushAllSync();
 	}
@@ -114,5 +126,17 @@ export default class ClaudeCodePlugin extends Plugin {
 		} catch (e) {
 			console.error("[claude-code] could not create plugin dirs", e);
 		}
+	}
+
+	/**
+	 * Pre-0.5 versions stored hook IPC artifacts under `<pluginDir>/tmp/`. The
+	 * IPC dir is now in system temp (see resolvePaths), so the legacy folder
+	 * is dead weight inside the vault — sweep it on every load. Idempotent.
+	 */
+	private migrateLegacyTmpDir(): void {
+		const paths = resolvePaths(this);
+		const legacy = join(paths.pluginDir, "tmp");
+		void fsp.rm(legacy, { recursive: true, force: true })
+			.catch((e) => logger.warn("legacy tmp cleanup failed", e));
 	}
 }

@@ -1,3 +1,13 @@
+import { HOOK_INNER_TIMEOUT_MS } from "../constants";
+
+export interface IsolatedEnvOptions {
+	configDir: string;
+	/** Hook IPC dir (system temp, per-vault); the hook script reads/writes here. */
+	tmpDir: string;
+	/** Extra env vars to set on the child (e.g. ELECTRON_RUN_AS_NODE=1). */
+	extras?: Record<string, string>;
+}
+
 /**
  * Build a process env that forces subscription OAuth via CLAUDE_CONFIG_DIR
  * and strips anything that could re-route auth (API keys, OAuth tokens,
@@ -9,7 +19,7 @@
  * release — see https://code.claude.com/docs/en/env-vars for the
  * authoritative current list.
  */
-export function buildIsolatedEnv(configDir: string): NodeJS.ProcessEnv {
+export function buildIsolatedEnv(opts: IsolatedEnvOptions): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = { ...process.env };
 
 	// Prefixes whose entire namespace can redirect auth or routing.
@@ -40,8 +50,14 @@ export function buildIsolatedEnv(configDir: string): NodeJS.ProcessEnv {
 		}
 	}
 
-	env.CLAUDE_CONFIG_DIR = configDir;
+	env.CLAUDE_CONFIG_DIR = opts.configDir;
 	env.DISABLE_AUTOUPDATER = "1";
 	env.NO_COLOR = "1";
+	// Forwarded to the PreToolUse hook child process via env inheritance.
+	env.OBSIDIAN_CC_TMP_DIR = opts.tmpDir;
+	env.OBSIDIAN_CC_HOOK_TIMEOUT_MS = String(HOOK_INNER_TIMEOUT_MS);
+	if (opts.extras) {
+		for (const [k, v] of Object.entries(opts.extras)) env[k] = v;
+	}
 	return env;
 }

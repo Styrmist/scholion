@@ -33,6 +33,16 @@ Carryover items from the v0.1.0 implementation review and post-MVP smoke testing
 - [ ] *Deferred.* **Index `toolCards` and `toolBlocks` by id.** `toolCards` is already a `Map` in `TranscriptView`. `toolBlocks` is walked linearly via `findToolBlock`/`findToolBlockGlobal`, but the hot path (`applyToolResult` in transcript) only walks the current turn (typically 1–10 blocks); the cold paths (permission decisions, abort) run on rare interactive events. Re-evaluate when sessions in the wild start exceeding ~10k tool calls.
 - [x] **Persist `lastTurnSummary` for the picker.** Populated from the first sentence (≤140 chars, sentence-boundary aware) of the last assistant turn after each `runTurn` completes; rendered as a 2-line clamp under the title in the SuggestModal.
 
+## Hook IPC follow-ups
+
+Deferred from the system-temp IPC migration ([src/permissions/hookServer.ts](src/permissions/hookServer.ts)).
+
+- [ ] *Deferred.* **Per-Obsidian-instance isolation for the multi-instance-same-vault case.** Two instances open on the same vault hash to the same IPC dir; either instance's `HookServer` can pick up the other's `.req`. Symptom is over-permissive (the receiving instance's allow-list is used). Fix: embed an instance UUID in `.req` filenames + filter — touches both hook scripts and the protocol.
+- [ ] *Deferred.* **Remove the backup directory poller entirely.** The 1s `scanForMissedRequests` was added to recover from `fs.watch` drops on iCloud-FSEvents under heavy concurrent writes. With local system-temp the poller almost never fires; revisit removal after a release cycle of telemetry.
+- [ ] *Deferred.* **User-facing `Notice` for ENOSPC / EACCES on the IPC dir.** Today these surface as a generic "Plugin could not read" deny; better UX would be a one-shot `Notice` pointing at the path in Settings → Advanced.
+- [ ] *Deferred.* **Rename `paths.tmpDir` → `paths.hookIpcDir`** at every call site (~9 sites, 5 files) plus the env var `OBSIDIAN_CC_TMP_DIR` → `OBSIDIAN_CC_HOOK_IPC_DIR`. Also requires regenerating the on-disk `permissionHook.sh`/`permissionHook.ps1` so old scripts on disk don't silently break. Mechanical churn; deferred for cost vs. clarity.
+- [ ] *Deferred.* **Migrate other plugin state to system temp.** Out of scope: only IPC was mislocated. `bin/`, `config/`, `sessions/` belong in the vault.
+
 ## Cross-platform
 
 - [ ] **Windows argv length cap (~32 KB).** Long pasted notes overflow. Fallback path: when prompt > 20 KB, write to `<plugin>/tmp/turn-<n>.txt` and feed via stdin (`-p` reads stdin if no positional arg) or use `--prompt-file` if it lands in the CLI.
@@ -46,3 +56,5 @@ Carryover items from the v0.1.0 implementation review and post-MVP smoke testing
 
 ## Extra
 - [x] Model selection in settings: dropdown with `sonnet` (default), `opus`, `haiku`, `opusplan`, plus a Custom… escape hatch for full model names / inference profile arns / deployment names.
+- [ ] Select text in chat with claude
+- [ ] Group requests so for user allow applys to block of requests. Currently for batch edits (for example) user sees 5 block for edit with buttons in first one but it will approve all requests in batch.
