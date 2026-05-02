@@ -2,7 +2,7 @@
 
 Run [Claude Code](https://claude.com/claude-code) in an Obsidian sidebar. Chat with Claude, let it read and edit notes via the standard tool set, and keep one persistent session per chat — all using your existing Claude.ai subscription (or any auth the bundled Claude Code CLI accepts).
 
-Desktop-only. Bundles its own copy of the official Claude Code binary; nothing else needs to be installed on the system.
+Desktop-only. Bundles its own copy of the official Claude Code binary to not violate Anthropic ToS about claude.ai subscription usage; nothing else needs to be installed on the system.
 
 ## Features
 - **Currently tested on macOS only.** Support for other platforms will be added soon.
