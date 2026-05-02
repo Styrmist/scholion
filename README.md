@@ -35,8 +35,8 @@ Treats the bundled CLI as an untrusted child process. Specifically:
 
 > Not yet listed in the Obsidian Community Plugins catalog. Install manually for now.
 
-1. Download `manifest.json`, `main.js`, and `styles.css` from a [GitHub release](https://github.com/) (your fork) or build them yourself (see Development below).
-2. Drop them into `<your-vault>/.obsidian/plugins/claude-code/`.
+1. Download `claude-code-<version>.zip` from the [latest GitHub release](https://github.com/Styrmist/obsidian-claude-code/releases/latest), or build it yourself (see Development below).
+2. Extract it directly into `<your-vault>/.obsidian/plugins/`. The archive contains a top-level `claude-code/` folder, so you'll end up with `<your-vault>/.obsidian/plugins/claude-code/{main.js,manifest.json,styles.css}`.
 3. In Obsidian: **Settings → Community plugins** → enable **Claude Code**.
 4. Open the new ribbon icon (or the command palette → "Claude Code") to reveal the chat view.
 5. **Settings → Claude Code → Binary → Install latest** to download the bundled CLI.
