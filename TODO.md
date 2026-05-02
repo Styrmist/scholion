@@ -1,0 +1,48 @@
+# TODO — next version
+
+Carryover items from the v0.1.0 implementation review and post-MVP smoke testing. Roughly ordered by impact within each bucket.
+
+## Functional
+
+- [x] **Permission denial via structured field.** Reads `result.permission_denials[]` (entries shaped `{ tool_name, tool_use_id, tool_input }`); legacy substring matcher kept as fallback for older CLIs.
+- [x] **Tool-call end-to-end smoke test.** Read/Grep/Edit lifecycle exercised; transcript replays from persisted JSON.
+- [x] **Inline permission prompt verification.** All four decisions (Allow once / Allow this session / Allow always / Deny) walked through and persistence verified across reloads.
+- [x] **Multi-block assistant turns.** Verified `text → tool_use → text` renders in document order in one assistant bubble.
+- [x] **Surface stderr to the user.** Per-session collapsible diagnostics panel ([src/ui/diagnosticsPanel.ts](src/ui/diagnosticsPanel.ts)) captures stderr and `api_retry` events into `SessionRecord.diagnostics` (capped at 500, persisted, clearable).
+- [x] **`--resume` failure fallback** now detected via `result.errors[]` in addition to stderr; `LOST_SESSION_PATTERN` broadened to match the CLI's actual `"No conversation found with session ID"` message.
+
+## Polish
+
+- [x] **Running session cost + token usage.** `SessionRecord.usage` accumulates per-turn cost + input/output/cache tokens; `StatusPill` shows `$X.XXXX · Nk in / Nk out` in idle state, persisted across reloads.
+- [x] **Spawn-delay feedback.** Status pill shows "Starting Claude…" before spawn, replaced with "Thinking…" on the first `system_init` event.
+- [x] **Tool result rendering for big outputs.** Card body shows preview as before; outputs over 4 KB get a "View full output (N B/KB/MB)" button that opens a scrollable monospace modal with copy-to-clipboard.
+- [x] **Streaming markdown render cost.** Chunk-and-commit: paragraphs separated by `\n\n` outside fenced code blocks are rendered once into committed sub-blocks; only the trailing live tail re-renders on each tick.
+- [x] **Session picker UX.** Click chip opens an Obsidian SuggestModal with fuzzy search and relative-time hints (`2h ago`, `Mar 14`); separate "⋯" menu for rename/delete/new chat.
+- [x] **Composer keybindings.** Placeholder hints `(Enter or ⌘↵ to send, Shift+Enter for newline)`. Cmd+Enter already worked via existing handler.
+- [x] **Stop button.** Now a prominent red-background pill (`background: var(--color-red)`) instead of muted secondary; replaces the Send slot when busy.
+
+## Risk hardening
+
+- [x] **`configDir` glob escaping.** Meta chars (`*?[]\`) in the configDir path are now wrapped in character classes via `escapeGlobMetaChars` before substitution into the deny patterns.
+- [x] **Argv-level OAuth env strip.** Extended strip list to cover `CLAUDE_CODE_OAUTH_*`, `CLAUDE_CODE_SKIP_*`, `CLAUDE_CODE_CLIENT_*`, `CLAUDE_CODE_CERT_*`, `AWS_*`, `AZURE_*`, `GOOGLE_*`, `GCLOUD_*` plus exact strips for `CLAUDE_CODE_API_KEY`, `CLAUDE_CODE_API_KEY_HELPER_TTL_MS`, `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`. Header comment points at the upstream env-vars doc as the audit reference.
+- [x] **GPG manifest verification.** Install flow now fetches `manifest.json.sig` and verifies it against Anthropic's embedded RSA-4096 public key (fingerprint `31DD DE24 DDFA B679 F42D 7BD2 BAA9 29FF 1A7E CACE`) via `openpgp.js` before trusting the manifest. Fail-closed: signature missing/malformed/invalid → install rejected, no binary written.
+
+## Architectural
+
+- [ ] *Deferred.* **Extract `TurnCoordinator` from [src/ui/view.ts](src/ui/view.ts).** ChatView is now ~570 lines. Splitting `runTurn`/`handleInlineDenial`/`handlePermissionDecision`/`abortCurrent` into a dedicated coordinator class would consolidate the `currentRecord !== turnRecord` race guards and the `pendingPermission` state machine. Pure refactor, no user-visible change — revisit if/when the file makes a real change painful.
+- [ ] *Deferred.* **Index `toolCards` and `toolBlocks` by id.** `toolCards` is already a `Map` in `TranscriptView`. `toolBlocks` is walked linearly via `findToolBlock`/`findToolBlockGlobal`, but the hot path (`applyToolResult` in transcript) only walks the current turn (typically 1–10 blocks); the cold paths (permission decisions, abort) run on rare interactive events. Re-evaluate when sessions in the wild start exceeding ~10k tool calls.
+- [x] **Persist `lastTurnSummary` for the picker.** Populated from the first sentence (≤140 chars, sentence-boundary aware) of the last assistant turn after each `runTurn` completes; rendered as a 2-line clamp under the title in the SuggestModal.
+
+## Cross-platform
+
+- [ ] **Windows argv length cap (~32 KB).** Long pasted notes overflow. Fallback path: when prompt > 20 KB, write to `<plugin>/tmp/turn-<n>.txt` and feed via stdin (`-p` reads stdin if no positional arg) or use `--prompt-file` if it lands in the CLI.
+- [ ] **Stale `claude.prev` cleanup on Windows.** A failed install can leave a file that's locked while Obsidian is running. Add a startup pass that retries unlinking files older than 24 h.
+- [ ] Cross-platform smoke test (macOS x64, Linux glibc x64, Linux musl, Windows x64) — only macOS arm64 has been exercised.
+- [x] iCloud-synced vault path with spaces and unicode — current dev vault has both; full end-to-end usage across v0.2.0–v0.3.x has worked without sync issues.
+
+## Verification not yet run
+
+- [x] Plugin reload during an in-flight turn — verified via Activity Monitor: `claude` child process disappears within ~2s of plugin disable / Obsidian reload, no zombies.
+
+## Extra
+- [x] Model selection in settings: dropdown with `sonnet` (default), `opus`, `haiku`, `opusplan`, plus a Custom… escape hatch for full model names / inference profile arns / deployment names.
