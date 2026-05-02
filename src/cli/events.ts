@@ -219,7 +219,7 @@ function numberField(r: RawEvent, key: string): number {
 }
 
 // Hook names look like "PreToolUse:Bash" — extract the trailing tool name when present.
-function parseToolFromHookName(hookName: string): string | undefined {
+export function parseToolFromHookName(hookName: string): string | undefined {
 	const idx = hookName.indexOf(":");
 	if (idx < 0) return undefined;
 	const tail = hookName.slice(idx + 1).trim();

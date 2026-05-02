@@ -3,6 +3,7 @@ import type ClaudeCodePlugin from "../main";
 import type { SessionRecord } from "../session/store";
 import type { ToolIndex } from "../session/toolIndex";
 import { ChatTurn, PermissionDecision, StreamEvent, ToolStatus } from "../types";
+import { formatBytes } from "../utils/format";
 import { MarkdownStream } from "./markdownStream";
 import { ToolCard } from "./toolCard";
 
@@ -312,8 +313,3 @@ export class TranscriptView {
 	}
 }
 
-function formatBytes(bytes: number): string {
-	if (bytes < 1024) return `${bytes} B`;
-	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-	return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}

@@ -85,31 +85,35 @@ export class ClaudeRunner {
 	}
 
 	private buildArgs(opts: SendOptions): string[] {
-		// cwd is set via spawn's options.cwd — there is no --cwd flag.
-		const args: string[] = [
-			"-p",
-			opts.prompt,
-			"--output-format",
-			"stream-json",
-			"--verbose",
-			"--include-partial-messages",
-			"--include-hook-events",
-			"--settings",
-			opts.settingsJson,
-		];
-		if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
-		// Permission lists are now consulted by the PreToolUse hook (HookServer)
-		// instead of being passed to the CLI directly. The CLI's `--allowedTools`
-		// would short-circuit the hook for matching tools, defeating interactivity.
-		if (opts.model) args.push("--model", opts.model);
-		if (opts.systemPromptAddendum && opts.systemPromptAddendum.trim()) {
-			args.push("--append-system-prompt", opts.systemPromptAddendum);
-		}
-		return args;
+		return buildArgs(opts);
 	}
 
 	private buildEnv(configDir: string): NodeJS.ProcessEnv {
 		const paths = resolvePaths(this.plugin);
 		return buildIsolatedEnv({ configDir, tmpDir: paths.tmpDir });
 	}
+}
+
+export function buildArgs(opts: SendOptions): string[] {
+	// cwd is set via spawn's options.cwd — there is no --cwd flag.
+	const args: string[] = [
+		"-p",
+		opts.prompt,
+		"--output-format",
+		"stream-json",
+		"--verbose",
+		"--include-partial-messages",
+		"--include-hook-events",
+		"--settings",
+		opts.settingsJson,
+	];
+	if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
+	// Permission lists are now consulted by the PreToolUse hook (HookServer)
+	// instead of being passed to the CLI directly. The CLI's `--allowedTools`
+	// would short-circuit the hook for matching tools, defeating interactivity.
+	if (opts.model) args.push("--model", opts.model);
+	if (opts.systemPromptAddendum && opts.systemPromptAddendum.trim()) {
+		args.push("--append-system-prompt", opts.systemPromptAddendum);
+	}
+	return args;
 }

@@ -10,13 +10,18 @@
  * containing literal `"` are extremely unusual.
  */
 export function buildHookCommand(scriptPath: string): string {
-	if (process.platform === "win32") {
+	return buildHookCommandFor(process.platform, scriptPath);
+}
+
+/** Platform-explicit form of buildHookCommand for testing both branches. */
+export function buildHookCommandFor(platform: NodeJS.Platform, scriptPath: string): string {
+	if (platform === "win32") {
 		return `powershell.exe -NoProfile -ExecutionPolicy Bypass -File ${quote(scriptPath)}`;
 	}
 	return quote(scriptPath);
 }
 
-function quote(p: string): string {
+export function quote(p: string): string {
 	const escaped = p.replace(/"/g, '\\"');
 	return `"${escaped}"`;
 }

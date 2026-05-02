@@ -5,9 +5,16 @@ import { CLAUDE_CODE_PUBLIC_KEY_ASC } from "./signingKey";
  * Verify a detached PGP signature against a manifest payload using
  * Anthropic's embedded public key. Throws on any failure path:
  * malformed input, key mismatch, expired/revoked key, bad signature.
+ *
+ * The `armoredPublicKey` argument is for testing only — production callers
+ * leave it on its default so the embedded Anthropic key is used.
  */
-export async function verifyManifestSignature(manifestText: string, signatureArmored: string): Promise<void> {
-	const publicKey = await openpgp.readKey({ armoredKey: CLAUDE_CODE_PUBLIC_KEY_ASC });
+export async function verifyManifestSignature(
+	manifestText: string,
+	signatureArmored: string,
+	armoredPublicKey: string = CLAUDE_CODE_PUBLIC_KEY_ASC,
+): Promise<void> {
+	const publicKey = await openpgp.readKey({ armoredKey: armoredPublicKey });
 	const message = await openpgp.createMessage({ text: manifestText });
 	const signature = await openpgp.readSignature({ armoredSignature: signatureArmored });
 	const verification = await openpgp.verify({

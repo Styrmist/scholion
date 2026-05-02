@@ -93,11 +93,11 @@ async function fromFile(app: App, file: TFile, opts: CaptureOptions): Promise<Ca
 	};
 }
 
-function isMarkdownLike(file: TFile): boolean {
+export function isMarkdownLike(file: TFile): boolean {
 	return file.extension === "md" || file.extension === "markdown" || file.extension === "txt";
 }
 
-function truncate(input: string, maxKB: number): {
+export function truncate(input: string, maxKB: number): {
 	content: string;
 	bytes: number;
 	truncated?: { originalBytes: number };
@@ -105,7 +105,14 @@ function truncate(input: string, maxKB: number): {
 	const max = Math.max(1, Math.floor(maxKB)) * 1024;
 	const buf = Buffer.from(input, "utf8");
 	if (buf.length <= max) return { content: input, bytes: buf.length };
-	const slice = buf.subarray(0, max).toString("utf8");
+	// Back up to a UTF-8 codepoint boundary so we never emit a U+FFFD
+	// replacement char tail. Continuation bytes are 10xxxxxx (0x80–0xBF);
+	// scan left until we reach a leading byte (0xxxxxxx or 11xxxxxx).
+	let end = max;
+	while (end > 0 && (buf[end] !== undefined) && (buf[end]! & 0xc0) === 0x80) {
+		end--;
+	}
+	const slice = buf.subarray(0, end).toString("utf8");
 	return {
 		content: slice,
 		bytes: max,

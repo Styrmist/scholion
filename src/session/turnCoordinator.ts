@@ -6,7 +6,6 @@ import { MAX_DIAGNOSTICS_PER_SESSION } from "../constants";
 import type { CapturedContext } from "../context/activeNote";
 import type ClaudeCodePlugin from "../main";
 import {
-	ChatTurn,
 	DiagnosticEntry,
 	PermissionDecision,
 	SendOptions,
@@ -17,6 +16,7 @@ import * as logger from "../utils/log";
 import { buildHookCommand } from "../permissions/hookCommandString";
 import { applyDecision } from "./permissions";
 import type { SessionRecord } from "./store";
+import { summarizeLastAssistantTurn } from "./summarize";
 import { ToolIndex } from "./toolIndex";
 import { canTransition, TurnLease, TurnState } from "./turnState";
 
@@ -555,19 +555,3 @@ function accumulateUsage(record: SessionRecord, costUsd: number | undefined, usa
 	}
 }
 
-function summarizeLastAssistantTurn(record: SessionRecord): string | undefined {
-	for (let i = record.turns.length - 1; i >= 0; i--) {
-		const turn: ChatTurn | undefined = record.turns[i];
-		if (!turn || turn.role !== "assistant") continue;
-		for (const block of turn.blocks) {
-			if (block.type === "text" && block.markdown.trim()) {
-				const flat = block.markdown.replace(/\s+/g, " ").trim();
-				const sentenceMatch = flat.match(/^.{1,140}?[.!?](?:\s|$)/);
-				const summary = sentenceMatch ? sentenceMatch[0].trim() : flat.slice(0, 140);
-				return summary.length > 140 ? summary.slice(0, 139) + "…" : summary;
-			}
-		}
-		return undefined;
-	}
-	return undefined;
-}

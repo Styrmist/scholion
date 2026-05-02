@@ -1,4 +1,5 @@
 import { SessionUsage } from "../types";
+import { formatUsage } from "../utils/format";
 
 export type StatusKind = "idle" | "thinking" | "tool" | "permission" | "error";
 
@@ -49,15 +50,3 @@ function defaultLabel(kind: StatusKind, usage: SessionUsage | null): string {
 	}
 }
 
-function formatUsage(u: SessionUsage): string {
-	const cost = `$${u.totalCostUsd.toFixed(4)}`;
-	const inTok = formatTokens(u.inputTokens);
-	const outTok = formatTokens(u.outputTokens);
-	return `${cost} · ${inTok} in / ${outTok} out`;
-}
-
-function formatTokens(n: number): string {
-	if (n < 1000) return `${n}`;
-	if (n < 10_000) return `${(n / 1000).toFixed(1)}k`;
-	return `${Math.round(n / 1000)}k`;
-}

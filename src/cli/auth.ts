@@ -16,7 +16,7 @@ import { buildIsolatedEnv } from "./env";
  * per-config-dir-suffixed Keychain entry (e.g. "Claude Code-credentials-<hash>"),
  * so checking the file system alone via `.credentials.json` doesn't work there.
  */
-function hasOauthAccount(configDir: string): boolean {
+export function hasOauthAccount(configDir: string): boolean {
 	const path = join(configDir, ".claude.json");
 	if (!existsSync(path)) return false;
 	try {
@@ -255,7 +255,7 @@ export class AuthManager {
 	}
 }
 
-function redactSecrets(text: string): string {
+export function redactSecrets(text: string): string {
 	return text
 		.replace(/code=[\w-]+/gi, "code=<redacted>")
 		.replace(/access_token[^\s"']+/gi, "access_token=<redacted>")

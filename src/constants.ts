@@ -34,7 +34,7 @@ export function buildSafetyDenyRules(configDir: string): Array<
 // Without this, a vault path containing `*`, `?`, `[`, `]`, or `\` would
 // silently turn the deny rule into something that doesn't match the
 // plugin's config dir — leaving credentials unprotected.
-function escapeGlobMetaChars(s: string): string {
+export function escapeGlobMetaChars(s: string): string {
 	return s.replace(/[*?[\]\\]/g, "[$&]");
 }
 
