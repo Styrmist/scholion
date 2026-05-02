@@ -5,7 +5,7 @@ Run [Claude Code](https://claude.com/claude-code) in an Obsidian sidebar. Chat w
 Desktop-only. Bundles its own copy of the official Claude Code binary; nothing else needs to be installed on the system.
 
 ## Features
-
+- **Currently tested on macOS only.** Support for other platforms will be added soon.
 - **Sidebar chat view**, multi-session, with persistent transcripts saved per session.
 - **Streaming markdown rendering** with chunk-and-commit so long responses stay snappy.
 - **Tool cards** for `Read`, `Grep`, `Edit`, `Write`, `Bash`, `WebFetch`, etc. Click the header to expand the body and see input + output preview; "View full output" opens larger results in a modal.
