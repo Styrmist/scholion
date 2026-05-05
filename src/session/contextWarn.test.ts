@@ -4,6 +4,7 @@ import {
 	ContextWarnState,
 	freshContextWarnState,
 	markContextWarnDelivered,
+	projectedContextSize,
 } from "./contextWarn";
 
 describe("checkContextWarn", () => {
@@ -69,5 +70,44 @@ describe("checkContextWarn", () => {
 describe("freshContextWarnState", () => {
 	it("starts with no delivered threshold", () => {
 		expect(freshContextWarnState()).toEqual({ warnedAtThreshold: null });
+	});
+});
+
+describe("projectedContextSize", () => {
+	it("returns 0 for undefined usage", () => {
+		expect(projectedContextSize(undefined)).toBe(0);
+	});
+
+	it("returns 0 for an empty usage object (all fields undefined)", () => {
+		expect(projectedContextSize({})).toBe(0);
+	});
+
+	it("sums input + cache_read + cache_creation + output", () => {
+		expect(
+			projectedContextSize({
+				input_tokens: 50,
+				cache_read_input_tokens: 100_000,
+				cache_creation_input_tokens: 1_000,
+				output_tokens: 2_500,
+			}),
+		).toBe(50 + 100_000 + 1_000 + 2_500);
+	});
+
+	it("treats missing fields as 0 — partial usage object is fine", () => {
+		expect(projectedContextSize({ input_tokens: 10, output_tokens: 20 })).toBe(30);
+	});
+
+	it("models the docs example: 100k cached + 50 post-breakpoint = 100050", () => {
+		// Per Anthropic prompt-caching docs: total_input_tokens for a request
+		// with 100k cache reads, 0 creation, and 50 post-breakpoint input is
+		// 100050. We then add output_tokens to get the projected next-turn size.
+		expect(
+			projectedContextSize({
+				input_tokens: 50,
+				cache_read_input_tokens: 100_000,
+				cache_creation_input_tokens: 0,
+				output_tokens: 0,
+			}),
+		).toBe(100_050);
 	});
 });

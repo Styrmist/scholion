@@ -348,11 +348,11 @@ export class ChatView extends ItemView {
 					],
 				});
 			},
-			onContextWarn: (record, lastTurnInputTokens) => {
+			onContextWarn: (record, projectedNextTurnTokens) => {
 				if (this.currentRecord !== record) return;
 				const state = this.getContextWarnState(record);
 				const result = checkContextWarn(
-					lastTurnInputTokens,
+					projectedNextTurnTokens,
 					this.plugin.settings.modelContextSize,
 					this.plugin.settings.contextWarnPercent,
 					state,
@@ -362,7 +362,7 @@ export class ChatView extends ItemView {
 				const usedFmt = formatTokens(result.usedTokens);
 				const thresholdFmt = formatTokens(result.thresholdTokens);
 				const sizeFmt = formatTokens(this.plugin.settings.modelContextSize);
-				const message = `Conversation is using ~${usedFmt} tokens — past the ${result.percent}% mark of the ${sizeFmt} context window (threshold ${thresholdFmt}). Consider /compact, forking, or starting a new chat soon.`;
+				const message = `Next turn projected at ~${usedFmt} tokens — past the ${result.percent}% mark of the ${sizeFmt} context window (threshold ${thresholdFmt}). Consider /compact, forking, or starting a new chat soon.`;
 				// Dual surface: transcript notice for the historical record,
 				// Notice toast so the user actually sees it. The transcript
 				// alone reads as a small muted line — easy to miss in a long

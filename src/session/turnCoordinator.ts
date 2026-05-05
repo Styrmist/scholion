@@ -15,6 +15,7 @@ import {
 } from "../types";
 import * as logger from "../utils/log";
 import { buildHookCommand } from "../permissions/hookCommandString";
+import { projectedContextSize } from "./contextWarn";
 import { applyDecision } from "./permissions";
 import type { SessionRecord } from "./store";
 import { summarizeLastAssistantTurn } from "./summarize";
@@ -66,11 +67,12 @@ export interface CoordinatorEvents {
 	 */
 	onCycleCapReached(prompt: CycleCapPrompt): void;
 	/**
-	 * The most recent turn's input-token count crossed the configured percent
-	 * of the model's context window. Fires per-record once until the threshold
-	 * value (or the warned-at marker) changes.
+	 * Fires after every successful turn with the projected size of the next
+	 * turn's prompt (input + cache_read + cache_creation + output). UI-side
+	 * warning logic compares this against the configured threshold and is
+	 * responsible for one-shot deduping.
 	 */
-	onContextWarn(record: SessionRecord, lastTurnInputTokens: number): void;
+	onContextWarn(record: SessionRecord, projectedNextTurnTokens: number): void;
 }
 
 /**
@@ -525,9 +527,13 @@ export class TurnCoordinator {
 			if (event.kind === "result") {
 				accumulateUsage(record, event.totalCostUsd, event.usage);
 				this.events.onUsageChanged(record);
-				const inputTokens = event.usage?.input_tokens;
-				if (typeof inputTokens === "number" && inputTokens > 0) {
-					this.events.onContextWarn(record, inputTokens);
+				// Project the next turn's prompt size — see projectedContextSize
+				// for the formula. With prompt caching active, raw input_tokens
+				// is just the post-breakpoint slice and is wildly low; the cache
+				// reads ARE in the model's context.
+				const projected = projectedContextSize(event.usage);
+				if (projected > 0) {
+					this.events.onContextWarn(record, projected);
 				}
 			}
 			if (event.kind === "tool_use") {
