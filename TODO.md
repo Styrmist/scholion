@@ -2,6 +2,12 @@
 
 Carryover items from the v0.1.0 implementation review and post-MVP smoke testing. Roughly ordered by impact within each bucket.
 
+## Known issues
+
+- [ ] **Auth state can drift between `.claude.json` and macOS Keychain.** Symptom: Settings → Account shows "Signed in as ...", but sending a message returns "Not logged in · Please run /login" in the chat. The plugin's [`isAuthenticated()`](src/cli/auth.ts) (and `getSignedInEmail`) checks only `<configDir>/.claude.json` for the `oauthAccount` block, while the actual OAuth tokens live in the macOS Keychain entry `Claude Code-credentials-<hash>` (the comment in [src/cli/auth.ts:14-17](src/cli/auth.ts) calls this out explicitly). If the Keychain entry is missing, unreadable, or hashed for a different config dir than the JSON, the two backends disagree and the file-only check returns a false positive. The CLI subprocess streams the auth error back as a chat reply rather than a structured signal, so the failure looks like a chat response. Workaround: Sign out → Sign in again to repopulate both backends in lockstep. Proposed fix has two parts:
+    1. Make `isAuthenticated()` actually probe the CLI (e.g. spawn a short `claude` invocation with `--print` on an empty/cheap prompt — or `claude doctor` / `claude auth status` if those land — and inspect exit code / first stream event) instead of just reading the JSON file. Cache the result for a few seconds to avoid spawning on every Settings open.
+    2. In [src/cli/runner.ts](src/cli/runner.ts) (or the stream `normalize` step in [src/cli/events.ts](src/cli/events.ts)), detect "Not logged in" / "Please run /login" patterns in the assistant stream and surface them as a structured auth-failure event. The [TurnCoordinator](src/session/turnCoordinator.ts) should then convert that into a transcript-level notice with a "Sign in again" button (mirroring the cycle-cap interactive notice plumbing added in 0.5.0) and abort the turn instead of letting the failure render as a chat message.
+
 ## Functional
 
 - [x] **Permission denial via structured field.** Reads `result.permission_denials[]` (entries shaped `{ tool_name, tool_use_id, tool_input }`); legacy substring matcher kept as fallback for older CLIs.
