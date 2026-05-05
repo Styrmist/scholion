@@ -20,6 +20,9 @@ export interface ComposerCallbacks {
 	getMentionCandidates: () => MentionCandidate[];
 	/** True when the mentions feature is enabled in settings. */
 	isMentionsEnabled: () => boolean;
+	/** Toggle plan-mode for subsequent turns in the active session. Sticky until toggled off or session changes. */
+	onTogglePlanMode: () => void;
+	isPlanModeOn: () => boolean;
 }
 
 const MENTION_POPUP_LIMIT = 8;
@@ -37,6 +40,7 @@ export class Composer {
 	private mentionPopup: MentionPopup;
 	/** Cursor index of the active `@` trigger, or null when no mention popup is in flight. */
 	private activeMentionTriggerStart: number | null = null;
+	private planModeBtn!: HTMLButtonElement;
 
 	constructor(parent: HTMLElement, private app: App, private callbacks: ComposerCallbacks) {
 		this.el = parent.createDiv({ cls: "cc-composer" });
@@ -95,6 +99,14 @@ export class Composer {
 		if (document.activeElement === this.textarea) this.installModEnter();
 
 		const actions = this.el.createDiv({ cls: "cc-composer__actions" });
+
+		this.planModeBtn = actions.createEl("button", { cls: "cc-composer__planmode" });
+		this.planModeBtn.addEventListener("click", () => {
+			this.callbacks.onTogglePlanMode();
+			this.refreshPlanModeBtn();
+		});
+		this.refreshPlanModeBtn();
+
 		this.sendBtn = actions.createEl("button", { cls: ["cc-composer__send", "mod-cta"], text: "Send" });
 		this.sendBtn.addEventListener("click", () => this.submit());
 
@@ -102,6 +114,18 @@ export class Composer {
 		setIcon(stop, "square");
 		stop.addEventListener("click", () => callbacks.onAbort());
 		stop.dataset.role = "stop";
+	}
+
+	refreshPlanModeBtn(): void {
+		const on = this.callbacks.isPlanModeOn();
+		this.planModeBtn.toggleClass("cc-composer__planmode--on", on);
+		this.planModeBtn.setText(on ? "Plan: on" : "Plan: off");
+		this.planModeBtn.setAttribute(
+			"title",
+			on
+				? "Plan mode is ON for the next turns. Claude will draft a plan and ask for approval before running tools. Click to turn off."
+				: "Click to turn on plan mode. Claude will propose a plan before executing tools.",
+		);
 	}
 
 	updateContext(context: CapturedContext | null, alreadyInContext: boolean): void {

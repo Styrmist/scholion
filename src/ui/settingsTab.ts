@@ -1,7 +1,10 @@
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 import { App, Modal, Notice, PluginSettingTab, Setting } from "obsidian";
 import type ClaudeCodePlugin from "../main";
 import { resolvePaths } from "../binary/paths";
 import { LoginPhase } from "../cli/auth";
+import { McpServerEntry, parseMcpServers } from "../cli/mcpServers";
 import { VIEW_TYPE_CHAT } from "../constants";
 import { SendMethod } from "../types";
 import { getElectronShell } from "../utils/electron";
@@ -36,7 +39,50 @@ export class ClaudeSettingsTab extends PluginSettingTab {
 		this.renderModelSection(containerEl);
 		this.renderContextSection(containerEl);
 		this.renderComposerSection(containerEl);
+		this.renderMcpSection(containerEl);
 		this.renderAdvancedSection(containerEl);
+	}
+
+	private renderMcpSection(containerEl: HTMLElement): void {
+		new Setting(containerEl).setName("Tool connectors").setHeading();
+
+		const paths = resolvePaths(this.plugin);
+		const userConfigPath = join(paths.configDir, ".claude.json");
+		const projectConfigPath = join(paths.vaultRoot, ".mcp.json");
+
+		const userServers = readMcpFromFile(userConfigPath, "mcpServers");
+		const projectServers = readMcpFromFile(projectConfigPath, "mcpServers");
+
+		const total = userServers.length + projectServers.length;
+		const desc = total === 0
+			? "No MCP servers configured. Add one with `claude mcp add` or by editing the config files below."
+			: `${total} configured. The plugin reads these read-only — edit the underlying file to add or remove servers.`;
+		new Setting(containerEl).setName("Status").setDesc(desc);
+
+		if (userServers.length > 0) {
+			containerEl.createEl("div", {
+				cls: "cc-settings__mcp-source",
+				text: `From ${userConfigPath}:`,
+			});
+			renderMcpList(containerEl, userServers);
+		}
+		if (projectServers.length > 0) {
+			containerEl.createEl("div", {
+				cls: "cc-settings__mcp-source",
+				text: `From ${projectConfigPath} (project-level):`,
+			});
+			renderMcpList(containerEl, projectServers);
+		}
+
+		new Setting(containerEl)
+			.setName("Open config folder")
+			.setDesc("Reveals the user-level .claude.json directory in your file manager.")
+			.addButton((b) =>
+				b.setButtonText("Show").onClick(() => {
+					const shellApi = getElectronShell();
+					if (shellApi?.openPath) void shellApi.openPath(paths.configDir);
+				}),
+			);
 	}
 
 	private renderRunawayGuardsSection(containerEl: HTMLElement): void {
@@ -91,6 +137,42 @@ export class ClaudeSettingsTab extends PluginSettingTab {
 						const num = Number(value);
 						if (Number.isFinite(num) && num >= 0) {
 							this.plugin.settings.maxToolCallsPerTurn = Math.floor(num);
+							await this.plugin.saveSettings();
+						}
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Model context window")
+			.setDesc(
+				"Tokens. The active model's full context window. Used as the basis for the approaching-limit warning. 0 disables the warning.",
+			)
+			.addText((t) =>
+				t
+					.setValue(String(this.plugin.settings.modelContextSize))
+					.setPlaceholder("200000")
+					.onChange(async (value) => {
+						const num = Number(value);
+						if (Number.isFinite(num) && num >= 0) {
+							this.plugin.settings.modelContextSize = Math.floor(num);
+							await this.plugin.saveSettings();
+						}
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Context warning threshold")
+			.setDesc(
+				"Percent of the model's context window at which to fire a one-shot warning. 0 or 100 disables.",
+			)
+			.addText((t) =>
+				t
+					.setValue(String(this.plugin.settings.contextWarnPercent))
+					.setPlaceholder("80")
+					.onChange(async (value) => {
+						const num = Number(value);
+						if (Number.isFinite(num) && num >= 0) {
+							this.plugin.settings.contextWarnPercent = num;
 							await this.plugin.saveSettings();
 						}
 					}),
@@ -506,5 +588,31 @@ class LoginModal extends Modal {
 				this.cancelBtn.setText("Close");
 				break;
 		}
+	}
+}
+
+function readMcpFromFile(path: string, _block: string): McpServerEntry[] {
+	if (!existsSync(path)) return [];
+	try {
+		return parseMcpServers(readFileSync(path, "utf8"));
+	} catch {
+		return [];
+	}
+}
+
+function renderMcpList(container: HTMLElement, servers: McpServerEntry[]): void {
+	const list = container.createDiv({ cls: "cc-settings__mcp-list" });
+	for (const server of servers) {
+		const row = list.createDiv({ cls: "cc-settings__mcp-row" });
+		const head = row.createDiv({ cls: "cc-settings__mcp-head" });
+		head.createSpan({ cls: "cc-settings__mcp-name", text: server.name });
+		head.createSpan({
+			cls: `cc-settings__mcp-transport cc-settings__mcp-transport--${server.transport}`,
+			text: server.transport,
+		});
+		if (server.disabled) {
+			head.createSpan({ cls: "cc-settings__mcp-disabled", text: "disabled" });
+		}
+		row.createDiv({ cls: "cc-settings__mcp-summary", text: server.summary });
 	}
 }

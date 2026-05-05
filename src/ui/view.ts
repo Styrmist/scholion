@@ -5,6 +5,12 @@ import { captureActiveContext, CapturedContext, isMarkdownLike, truncate } from 
 import { buildPrompt, shouldAttach } from "../context/promptBuilder";
 import { VIEW_TYPE_CHAT, RIBBON_ICON } from "../constants";
 import {
+	checkContextWarn,
+	ContextWarnState,
+	freshContextWarnState,
+	markContextWarnDelivered,
+} from "../session/contextWarn";
+import {
 	checkCostGuard,
 	CostGuardState,
 	freshCostGuardState,
@@ -47,6 +53,13 @@ export class ChatView extends ItemView {
 	 * deletion is automatic when sessions are unloaded.
 	 */
 	private costGuardStates = new WeakMap<SessionRecord, CostGuardState>();
+	/**
+	 * Context-warn state per record (mirrors costGuardStates). Tracks the
+	 * threshold last warned at so we don't re-fire every turn past 80%.
+	 */
+	private contextWarnStates = new WeakMap<SessionRecord, ContextWarnState>();
+	/** Per-session plan-mode override. Sticky until toggled off or session changes. In-memory. */
+	private planModeOn = false;
 
 	constructor(leaf: WorkspaceLeaf, private plugin: ClaudeCodePlugin) {
 		super(leaf);
@@ -91,6 +104,8 @@ export class ChatView extends ItemView {
 			getSendMethod: () => this.plugin.settings.sendMethod,
 			getMentionCandidates: () => this.collectMentionCandidates(),
 			isMentionsEnabled: () => this.plugin.settings.enableMentions,
+			onTogglePlanMode: () => { this.planModeOn = !this.planModeOn; },
+			isPlanModeOn: () => this.planModeOn,
 		});
 
 		this.coordinator = new TurnCoordinator(
@@ -165,6 +180,8 @@ export class ChatView extends ItemView {
 		this.diagnosticsPanel.setEntries(record.diagnostics);
 		this.statusPill.setUsage(record.usage ?? null);
 		this.picker.setActive(meta);
+		this.planModeOn = false;
+		this.composer.refreshPlanModeBtn();
 		this.composer.focus();
 		await this.refreshContext();
 	}
@@ -181,6 +198,8 @@ export class ChatView extends ItemView {
 		this.transcript.renderHistoricalTurns(record.turns);
 		this.diagnosticsPanel.setEntries(record.diagnostics);
 		this.statusPill.setUsage(record.usage ?? null);
+		this.planModeOn = false;
+		this.composer.refreshPlanModeBtn();
 		this.composer.focus();
 		await this.refreshContext();
 	}
@@ -291,7 +310,9 @@ export class ChatView extends ItemView {
 		record.turns.push(assistantTurn);
 		this.transcript.beginAssistantTurn(assistantTurn, record.turns.length - 1);
 
-		this.coordinator.startTurn(prompt, finalContext?.contentHash);
+		this.coordinator.startTurn(prompt, finalContext?.contentHash, {
+			permissionMode: this.planModeOn ? "plan" : undefined,
+		});
 	}
 
 	private coordinatorEvents(): CoordinatorEvents {
@@ -323,7 +344,34 @@ export class ChatView extends ItemView {
 					],
 				});
 			},
+			onContextWarn: (record, lastTurnInputTokens) => {
+				if (this.currentRecord !== record) return;
+				const state = this.getContextWarnState(record);
+				const result = checkContextWarn(
+					lastTurnInputTokens,
+					this.plugin.settings.modelContextSize,
+					this.plugin.settings.contextWarnPercent,
+					state,
+				);
+				if (result.kind !== "warn") return;
+				markContextWarnDelivered(state, result.thresholdTokens);
+				const usedK = Math.round(result.usedTokens / 1000);
+				const thresholdK = Math.round(result.thresholdTokens / 1000);
+				const sizeK = Math.round(this.plugin.settings.modelContextSize / 1000);
+				this.transcript.appendSystemNotice(
+					`Conversation is using ~${usedK}k tokens — past the ${result.percent}% mark of the ${sizeK}k context window (threshold ${thresholdK}k). Consider /compact, forking, or starting a new chat soon.`,
+				);
+			},
 		};
+	}
+
+	private getContextWarnState(record: SessionRecord): ContextWarnState {
+		let state = this.contextWarnStates.get(record);
+		if (!state) {
+			state = freshContextWarnState();
+			this.contextWarnStates.set(record, state);
+		}
+		return state;
 	}
 
 	/**
@@ -482,6 +530,8 @@ export class ChatView extends ItemView {
 		this.diagnosticsPanel.setEntries(record.diagnostics);
 		this.statusPill.setUsage(record.usage ?? null);
 		this.picker.setActive(record.meta);
+		this.planModeOn = false;
+		this.composer.refreshPlanModeBtn();
 		this.composer.focus();
 		await this.refreshContext();
 	}

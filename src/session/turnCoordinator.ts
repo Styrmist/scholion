@@ -8,6 +8,7 @@ import type ClaudeCodePlugin from "../main";
 import {
 	DiagnosticEntry,
 	PermissionDecision,
+	PermissionMode,
 	SendOptions,
 	StreamEvent,
 	UsageInfo,
@@ -64,6 +65,12 @@ export interface CoordinatorEvents {
 	 * one calls back through the supplied callbacks.
 	 */
 	onCycleCapReached(prompt: CycleCapPrompt): void;
+	/**
+	 * The most recent turn's input-token count crossed the configured percent
+	 * of the model's context window. Fires per-record once until the threshold
+	 * value (or the warned-at marker) changes.
+	 */
+	onContextWarn(record: SessionRecord, lastTurnInputTokens: number): void;
 }
 
 /**
@@ -133,12 +140,16 @@ export class TurnCoordinator {
 		return this.state.kind === "awaiting_permission";
 	}
 
-	startTurn(prompt: string, contextHashToCommit: string | undefined): void {
+	startTurn(
+		prompt: string,
+		contextHashToCommit: string | undefined,
+		opts: { permissionMode?: PermissionMode } = {},
+	): void {
 		const record = this.record;
 		if (!record) return;
 		this.toolUseCountThisTurn = 0;
 		this.cycleCapHeld = null;
-		void this.runTurn(record, prompt, contextHashToCommit, this.mintLease());
+		void this.runTurn(record, prompt, contextHashToCommit, this.mintLease(), opts.permissionMode);
 	}
 
 	/**
@@ -484,6 +495,7 @@ export class TurnCoordinator {
 		prompt: string,
 		contextHashToCommit: string | undefined,
 		lease: TurnLease,
+		permissionModeOverride?: PermissionMode,
 	): Promise<void> {
 		this.transitionTo({ kind: "starting", lease });
 		const controller = new AbortController();
@@ -513,6 +525,10 @@ export class TurnCoordinator {
 			if (event.kind === "result") {
 				accumulateUsage(record, event.totalCostUsd, event.usage);
 				this.events.onUsageChanged(record);
+				const inputTokens = event.usage?.input_tokens;
+				if (typeof inputTokens === "number" && inputTokens > 0) {
+					this.events.onContextWarn(record, inputTokens);
+				}
 			}
 			if (event.kind === "tool_use") {
 				this.toolUseCountThisTurn++;
@@ -545,7 +561,7 @@ export class TurnCoordinator {
 
 		try {
 			const result = await this.plugin.runner.send(
-				this.composeSendOptions(record, prompt, controller.signal, onEvent),
+				this.composeSendOptions(record, prompt, controller.signal, onEvent, permissionModeOverride),
 			);
 			logger.log("turn complete", {
 				exitCode: result.exitCode,
@@ -576,7 +592,7 @@ export class TurnCoordinator {
 				logger.warn("Claude lost track of the session; retrying without --resume");
 				record.meta.id = undefined;
 				this.events.onSystemNotice("Claude lost track of this session and started a new one.");
-				await this.runTurn(record, prompt, contextHashToCommit, this.mintLease());
+				await this.runTurn(record, prompt, contextHashToCommit, this.mintLease(), permissionModeOverride);
 				return;
 			}
 
@@ -646,19 +662,21 @@ export class TurnCoordinator {
 		prompt: string,
 		signal: AbortSignal,
 		onEvent: (event: StreamEvent) => void,
+		permissionModeOverride?: PermissionMode,
 	): SendOptions {
 		const paths = resolvePaths(this.plugin);
+		const effectivePermissionMode = permissionModeOverride ?? this.plugin.settings.permissionMode;
 		return {
 			prompt,
 			cwd: paths.vaultRoot,
 			binaryPath: paths.binaryPath,
 			configDir: paths.configDir,
 			resumeSessionId: record.meta.id,
-			permissionMode: this.plugin.settings.permissionMode,
+			permissionMode: effectivePermissionMode,
 			model: this.plugin.settings.model || undefined,
 			systemPromptAddendum: this.plugin.settings.systemPromptAddendum || undefined,
 			settingsJson: buildSettingsJson({
-				permissionMode: this.plugin.settings.permissionMode,
+				permissionMode: effectivePermissionMode,
 				configDir: this.plugin.app.vault.configDir,
 				hookCommand: buildHookCommand(paths.hookScriptPath),
 			}),

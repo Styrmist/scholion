@@ -419,6 +419,33 @@
 	display: flex;
 	gap: 6px;
 	justify-content: flex-end;
+	align-items: center;
+}
+
+.cc-composer__planmode {
+	margin-right: auto;
+	padding: 4px 10px;
+	background: transparent;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+}
+
+.cc-composer__planmode:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.cc-composer__planmode--on {
+	background: var(--color-accent);
+	color: var(--text-on-accent);
+	border-color: var(--color-accent);
+}
+
+.cc-composer__planmode--on:hover {
+	filter: brightness(1.1);
 }
 
 .cc-composer__send,
@@ -509,6 +536,66 @@
 
 .cc-settings__warning:empty {
 	display: none;
+}
+
+.cc-settings__mcp-source {
+	margin: 12px 0 4px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	font-family: var(--font-monospace);
+	word-break: break-all;
+}
+
+.cc-settings__mcp-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-bottom: 12px;
+}
+
+.cc-settings__mcp-row {
+	padding: 6px 8px;
+	background: var(--background-secondary);
+	border-radius: 4px;
+}
+
+.cc-settings__mcp-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 2px;
+}
+
+.cc-settings__mcp-name {
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.cc-settings__mcp-transport {
+	font-size: var(--font-ui-smaller);
+	padding: 1px 6px;
+	border-radius: 3px;
+	background: var(--background-modifier-border);
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.cc-settings__mcp-transport--stdio { background: var(--color-blue); color: var(--text-on-accent); }
+.cc-settings__mcp-transport--sse,
+.cc-settings__mcp-transport--http  { background: var(--color-green); color: var(--text-on-accent); }
+.cc-settings__mcp-transport--unknown { background: var(--color-orange); color: var(--text-on-accent); }
+
+.cc-settings__mcp-disabled {
+	font-size: var(--font-ui-smaller);
+	color: var(--color-red);
+}
+
+.cc-settings__mcp-summary {
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	word-break: break-all;
 }
 
 .cc-modal__input {

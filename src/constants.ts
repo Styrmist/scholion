@@ -84,4 +84,10 @@ export const DEFAULT_COST_HARD_CAP_USD = 0;
 // and well below the runaway-loop danger zone; users can lower it or set 0.
 export const DEFAULT_MAX_TOOL_CALLS_PER_TURN = 100;
 
+// Context-window warning. Defaults match Anthropic's 200K window that all
+// current Claude 4.x models share. Users on the 1M extended window can
+// raise the size; the percent is a soft warn point.
+export const DEFAULT_MODEL_CONTEXT_SIZE = 200_000;
+export const DEFAULT_CONTEXT_WARN_PERCENT = 80;
+
 export const RIBBON_ICON = "bot";
