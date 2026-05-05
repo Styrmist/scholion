@@ -328,6 +328,50 @@
 	flex-direction: column;
 	gap: 6px;
 	background: var(--background-primary);
+	position: relative;
+}
+
+.cc-mention-popup {
+	position: absolute;
+	left: 8px;
+	right: 8px;
+	bottom: calc(100% + 4px);
+	max-height: 240px;
+	overflow-y: auto;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+	z-index: 30;
+}
+
+.cc-mention-popup__row {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	padding: 4px 8px;
+	cursor: pointer;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.cc-mention-popup__row--selected,
+.cc-mention-popup__row:hover {
+	background: var(--background-modifier-hover);
+}
+
+.cc-mention-popup__name {
+	color: var(--text-normal);
+	font-weight: 500;
+}
+
+.cc-mention-popup__path {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	min-width: 0;
 }
 
 .cc-composer__input {

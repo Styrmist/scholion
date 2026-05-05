@@ -3,37 +3,56 @@ import { CapturedContext } from "./activeNote";
 export interface BuildPromptArgs {
 	userText: string;
 	context: CapturedContext | null;
+	/**
+	 * Notes the user explicitly referenced via `@[[Name]]` syntax. Serialized
+	 * as `<obsidian_mentioned_note>` blocks so the model can distinguish them
+	 * from the implicit active-note attachment. Empty / undefined when no
+	 * mentions resolved.
+	 */
+	mentions?: ReadonlyArray<CapturedContext>;
 }
 
 export function buildPrompt(args: BuildPromptArgs): string {
 	const sections: string[] = [];
-	if (args.context) sections.push(serializeContext(args.context));
+	if (args.context) sections.push(serializeActiveNote(args.context));
+	for (const mention of args.mentions ?? []) {
+		sections.push(serializeMention(mention));
+	}
 	sections.push(`<user_message>\n${args.userText}\n</user_message>`);
 	return sections.join("\n\n");
 }
 
-function serializeContext(ctx: CapturedContext): string {
+function serializeActiveNote(ctx: CapturedContext): string {
+	return serializeAs("obsidian_active_note", ctx);
+}
+
+function serializeMention(ctx: CapturedContext): string {
+	return serializeAs("obsidian_mentioned_note", ctx);
+}
+
+function serializeAs(tag: string, ctx: CapturedContext): string {
 	const escapedPath = escapeXmlAttr(ctx.path);
 	const range = ctx.range ? ` lines="${ctx.range[0]}-${ctx.range[1]}"` : "";
 	const truncated = ctx.truncated
 		? `\n  <truncated original_bytes="${ctx.truncated.originalBytes}"/>`
 		: "";
-	const safeContent = escapeContentBody(ctx.content);
+	const safeContent = escapeContentBody(ctx.content, tag);
 	return [
-		`<obsidian_active_note path="${escapedPath}" kind="${ctx.kind}"${range}>`,
+		`<${tag} path="${escapedPath}" kind="${ctx.kind}"${range}>`,
 		`  <content>`,
 		safeContent,
 		`  </content>${truncated}`,
-		`</obsidian_active_note>`,
+		`</${tag}>`,
 	].join("\n");
 }
 
-function escapeContentBody(content: string): string {
+function escapeContentBody(content: string, outerTag: string): string {
 	// Prevent the model's parser from seeing a stray closing tag if the note
-	// body contains literal "</content>" or "</obsidian_active_note>".
+	// body contains literal "</content>" or the outer tag's literal closer.
+	const closer = new RegExp(`<\\/${outerTag}>`, "gi");
 	return content
 		.replace(/<\/content>/gi, "<\\/content>")
-		.replace(/<\/obsidian_active_note>/gi, "<\\/obsidian_active_note>");
+		.replace(closer, `<\\/${outerTag}>`);
 }
 
 function escapeXmlAttr(value: string): string {

@@ -365,6 +365,18 @@ export class ClaudeSettingsTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Mention vault notes with @")
+			.setDesc(
+				"Type @ in the composer to autocomplete a vault note. The referenced note's content is attached to the prompt at send time.",
+			)
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.enableMentions).onChange(async (value) => {
+					this.plugin.settings.enableMentions = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
 			.setName("Prefer selection when present")
 			.setDesc("Attach only the selected text instead of the whole note when there's a selection.")
 			.addToggle((t) =>

@@ -1,6 +1,7 @@
-import { ItemView, Notice, WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import { resolvePaths } from "../binary/paths";
-import { captureActiveContext, CapturedContext } from "../context/activeNote";
+import { MentionCandidate, parseMentions } from "../composer/mentions";
+import { captureActiveContext, CapturedContext, isMarkdownLike, truncate } from "../context/activeNote";
 import { buildPrompt, shouldAttach } from "../context/promptBuilder";
 import { VIEW_TYPE_CHAT, RIBBON_ICON } from "../constants";
 import {
@@ -10,6 +11,7 @@ import {
 	markCapBypassed,
 	markWarnDelivered,
 } from "../session/costGuard";
+import { hashString } from "../utils/fs";
 import type { SessionRecord } from "../session/store";
 import { ToolIndex } from "../session/toolIndex";
 import { CoordinatorEvents, TurnCoordinator, TurnOutcome } from "../session/turnCoordinator";
@@ -81,6 +83,8 @@ export class ChatView extends ItemView {
 			onSubmit: ({ text, attachContext }) => { void this.handleSubmit(text, attachContext); },
 			onAbort: () => this.coordinator.abort(),
 			getSendMethod: () => this.plugin.settings.sendMethod,
+			getMentionCandidates: () => this.collectMentionCandidates(),
+			isMentionsEnabled: () => this.plugin.settings.enableMentions,
 		});
 
 		this.coordinator = new TurnCoordinator(
@@ -109,6 +113,16 @@ export class ChatView extends ItemView {
 		);
 		this.registerEvent(
 			this.app.workspace.on("editor-change", () => { void this.refreshContext(); })
+		);
+		// Stale-context defenses: a rename swaps the path under us (the captured
+		// path becomes wrong); a delete removes the file (capture should fall
+		// through to a different markdown leaf or null). Both fire vault events
+		// that workspace `active-leaf-change` doesn't, so listen explicitly.
+		this.registerEvent(
+			this.app.vault.on("rename", () => { void this.refreshContext(); })
+		);
+		this.registerEvent(
+			this.app.vault.on("delete", () => { void this.refreshContext(); })
 		);
 
 		await this.refreshContext();
@@ -218,7 +232,8 @@ export class ChatView extends ItemView {
 		const previousHash = record.permissions.lastAttached?.contentHash;
 		const willAttach = context !== null && shouldAttach(context, previousHash);
 		const finalContext = willAttach ? context : null;
-		const prompt = buildPrompt({ userText: text, context: finalContext });
+		const mentions = await this.materializeMentions(text, finalContext?.path ?? null);
+		const prompt = buildPrompt({ userText: text, context: finalContext, mentions });
 
 		const userTurn: ChatTurn = {
 			role: "user",
@@ -232,6 +247,12 @@ export class ChatView extends ItemView {
 						kind: finalContext.kind,
 					}]
 					: []),
+				...mentions.map((m) => ({
+					type: "context_attachment" as const,
+					path: m.path,
+					bytes: m.bytes,
+					kind: m.kind,
+				})),
 				{ type: "text" as const, markdown: text },
 			],
 		};
@@ -338,6 +359,65 @@ export class ChatView extends ItemView {
 			this.costGuardStates.set(record, state);
 		}
 		return state;
+	}
+
+	/**
+	 * List vault notes available for `@`-mention autocomplete. Sorted by mtime
+	 * desc so recently edited notes show first when the query is empty.
+	 */
+	private collectMentionCandidates(): MentionCandidate[] {
+		const files = this.app.vault.getMarkdownFiles();
+		files.sort((a, b) => (b.stat?.mtime ?? 0) - (a.stat?.mtime ?? 0));
+		return files.map((f) => ({ basename: f.basename, path: f.path }));
+	}
+
+	/**
+	 * Resolve `@[[Name]]` references in user text into capturable note content
+	 * for the prompt. Skips: mentions whose name doesn't resolve, mentions
+	 * pointing at the same path as the auto-attached active note (already in
+	 * context), and non-markdown-like files. Reads with the same `maxAttachKB`
+	 * cap as the auto-attach.
+	 */
+	private async materializeMentions(
+		userText: string,
+		activePath: string | null,
+	): Promise<CapturedContext[]> {
+		if (!this.plugin.settings.enableMentions) return [];
+		const parsed = parseMentions(userText);
+		if (parsed.length === 0) return [];
+		const out: CapturedContext[] = [];
+		const seenPaths = new Set<string>();
+		if (activePath) seenPaths.add(activePath);
+		for (const m of parsed) {
+			const file = this.resolveMentionFile(m.name);
+			if (!file) continue;
+			if (seenPaths.has(file.path)) continue;
+			if (!isMarkdownLike(file)) continue;
+			const raw = await this.app.vault.cachedRead(file);
+			const truncated = truncate(raw, this.plugin.settings.maxAttachKB);
+			out.push({
+				kind: "note",
+				path: file.path,
+				content: truncated.content,
+				contentHash: hashString(`mention:${file.path}:${truncated.content}`),
+				bytes: truncated.bytes,
+				truncated: truncated.truncated,
+			});
+			seenPaths.add(file.path);
+		}
+		return out;
+	}
+
+	private resolveMentionFile(name: string): TFile | null {
+		// Wikilink-style resolution first; falls back to a literal path lookup
+		// for users who insert paths directly (e.g. by pasting).
+		const linked = this.app.metadataCache.getFirstLinkpathDest(name, "");
+		if (linked) return linked;
+		const direct = this.app.vault.getAbstractFileByPath(name);
+		if (direct instanceof TFile) return direct;
+		const withMd = this.app.vault.getAbstractFileByPath(`${name}.md`);
+		if (withMd instanceof TFile) return withMd;
+		return null;
 	}
 
 	private applyTurnState(state: TurnState): void {

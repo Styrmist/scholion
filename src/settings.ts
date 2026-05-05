@@ -25,6 +25,8 @@ export interface PluginSettings {
 	costHardCapUsd: number;
 	/** Per-turn cap on assistant `tool_use` events; 0 disables. Pauses the turn at the next hook-gated tool. */
 	maxToolCallsPerTurn: number;
+	/** When true, the composer offers `@`-mention autocomplete and resolves `@[[Name]]` references at send time. */
+	enableMentions: boolean;
 	sessions: SessionMeta[];
 }
 
@@ -43,5 +45,6 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 	costWarnUsd: DEFAULT_COST_WARN_USD,
 	costHardCapUsd: DEFAULT_COST_HARD_CAP_USD,
 	maxToolCallsPerTurn: DEFAULT_MAX_TOOL_CALLS_PER_TURN,
+	enableMentions: true,
 	sessions: [],
 };

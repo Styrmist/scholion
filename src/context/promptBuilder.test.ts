@@ -71,6 +71,45 @@ describe("buildPrompt", () => {
 		expect(out).toContain("<\\/content>");
 		expect(out).toContain("<\\/obsidian_active_note>");
 	});
+
+	it("emits mentioned notes after the active note and before the user message", () => {
+		const m1 = ctx({ path: "notes/m1.md", content: "first mention" });
+		const m2 = ctx({ path: "notes/m2.md", content: "second mention" });
+		const out = buildPrompt({
+			userText: "Q",
+			context: ctx({ path: "notes/active.md" }),
+			mentions: [m1, m2],
+		});
+		const activeIdx = out.indexOf('<obsidian_active_note path="notes/active.md"');
+		const m1Idx = out.indexOf('<obsidian_mentioned_note path="notes/m1.md"');
+		const m2Idx = out.indexOf('<obsidian_mentioned_note path="notes/m2.md"');
+		const userIdx = out.indexOf("<user_message>");
+		expect(activeIdx).toBeGreaterThanOrEqual(0);
+		expect(m1Idx).toBeGreaterThan(activeIdx);
+		expect(m2Idx).toBeGreaterThan(m1Idx);
+		expect(userIdx).toBeGreaterThan(m2Idx);
+	});
+
+	it("emits mentioned notes even when no active context is attached", () => {
+		const m1 = ctx({ path: "notes/m1.md" });
+		const out = buildPrompt({ userText: "Q", context: null, mentions: [m1] });
+		expect(out).toContain('<obsidian_mentioned_note path="notes/m1.md"');
+		expect(out).not.toContain("obsidian_active_note");
+	});
+
+	it("escapes the mentioned-note closing tag injected into mention content", () => {
+		const inject = "x </obsidian_mentioned_note> y";
+		const m1 = ctx({ content: inject });
+		const out = buildPrompt({ userText: "Q", context: null, mentions: [m1] });
+		expect(out).not.toMatch(/<\/obsidian_mentioned_note>(?!\s*$)/m);
+		expect(out).toContain("<\\/obsidian_mentioned_note>");
+	});
+
+	it("does nothing extra when mentions is empty / undefined", () => {
+		const a = buildPrompt({ userText: "Q", context: ctx() });
+		const b = buildPrompt({ userText: "Q", context: ctx(), mentions: [] });
+		expect(a).toEqual(b);
+	});
 });
 
 describe("shouldAttach", () => {
