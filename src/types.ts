@@ -34,6 +34,14 @@ export interface SessionMeta {
 	cwd: string;
 	model?: string;
 	lastTurnSummary?: string;
+	/**
+	 * Set once the auto-titler has attempted to suggest a title for this
+	 * session. One-shot: once true, the titler never runs again for this
+	 * session even if the user later renames or deletes the suggested
+	 * title. Manual rename always wins (the titler captures the title at
+	 * spawn and only writes if the title is unchanged on completion).
+	 */
+	titleAutoSuggested?: boolean;
 }
 
 export interface AttachmentRef {

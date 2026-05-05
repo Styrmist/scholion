@@ -10,6 +10,7 @@
 
 import { TOOL_OUTPUT_PREVIEW_BYTES } from "../constants";
 import type { SessionRecord } from "./store";
+import { stripNoise, trimPunctNoise } from "./titleClean";
 import {
 	ChatTurn,
 	ContextAttachmentBlock,
@@ -92,9 +93,7 @@ export function normalizeExportPath(raw: string): string {
  * name within typical filesystem limits.
  */
 export function slugifyForFilename(s: string): string {
-	let cleaned = s.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
-	cleaned = cleaned.replace(/https?:\/\/\S+/gi, " ");
-	cleaned = cleaned.replace(/\bhttps?\b/gi, " ");
+	let cleaned = stripNoise(s);
 	cleaned = cleaned.replace(/[/\\:*?"<>|#^[\]]/g, " ");
 	cleaned = cleaned.replace(/\s+/g, " ").trim();
 	cleaned = trimPunctNoise(cleaned);
@@ -102,15 +101,6 @@ export function slugifyForFilename(s: string): string {
 	const max = 80;
 	const capped = cleaned.length > max ? cleaned.slice(0, max).trimEnd() : cleaned;
 	return trimPunctNoise(capped) || "Chat";
-}
-
-/**
- * Strip leading/trailing characters that are valid in filenames but make for
- * an ugly stem after URL/link removal — parens, dots, quotes, dashes, the
- * ellipsis Claude uses to mark truncation, etc.
- */
-function trimPunctNoise(s: string): string {
-	return s.replace(/^[\s.,;:!?…()\-—–"'`]+|[\s.,;:!?…()\-—–"'`]+$/g, "");
 }
 
 function renderHeader(meta: SessionMeta, usage: SessionUsage | undefined): string {
