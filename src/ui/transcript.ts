@@ -23,8 +23,6 @@ interface AssistantTurnContext {
 	turnIndex: number;
 	containerEl: HTMLElement;
 	currentBubble: TextBubble | null;
-	/** The fork button rendered on this turn (hidden until the turn finalizes). */
-	forkBtn: HTMLElement | null;
 }
 
 interface TextBubble {
@@ -116,13 +114,11 @@ export class TranscriptView {
 
 	beginAssistantTurn(turn: ChatTurn, turnIndex: number): void {
 		const turnEl = this.container.createDiv({ cls: ["cc-turn", "cc-turn--assistant"] });
-		const forkBtn = this.makeForkButton(turnIndex);
-		// Hide while streaming: forking an in-flight turn is undefined behavior
-		// (the CLI subprocess is still running; the parent session would race
-		// with the just-cloned fork). Reveal in finalizeTurn.
-		forkBtn.addClass("cc-hidden");
-		turnEl.appendChild(forkBtn);
-		this.active = { turn, turnIndex, containerEl: turnEl, currentBubble: null, forkBtn };
+		// Fork button is appended in finalizeTurn after all streaming content
+		// has landed, so it consistently sits at the END of the turn (matches
+		// historical-render placement). Streaming turns aren't forkable
+		// anyway, so the absence of the button here is correct.
+		this.active = { turn, turnIndex, containerEl: turnEl, currentBubble: null };
 		this.scrollToBottom();
 	}
 
@@ -298,12 +294,15 @@ export class TranscriptView {
 	}
 
 	finalizeTurn(): void {
-		const bubble = this.active?.currentBubble;
+		const active = this.active;
+		const bubble = active?.currentBubble;
 		bubble?.stream.finalize().catch(() => undefined);
-		// Reveal the fork affordance once the turn is no longer in flight.
+		// Append the fork affordance at the end of the now-complete turn.
 		// Aborted turns also become forkable — branching off a partial reply
 		// is sometimes exactly what the user wants.
-		this.active?.forkBtn?.removeClass("cc-hidden");
+		if (active) {
+			active.containerEl.appendChild(this.makeForkButton(active.turnIndex));
+		}
 		this.active = null;
 	}
 
