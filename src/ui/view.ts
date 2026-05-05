@@ -22,6 +22,7 @@ import {
 	freshForkMeta,
 	serializeInheritedTurns,
 } from "../session/forking";
+import { formatTokens } from "../utils/format";
 import { hashString } from "../utils/fs";
 import type { SessionRecord } from "../session/store";
 import { ToolIndex } from "../session/toolIndex";
@@ -58,8 +59,10 @@ export class ChatView extends ItemView {
 	 * threshold last warned at so we don't re-fire every turn past 80%.
 	 */
 	private contextWarnStates = new WeakMap<SessionRecord, ContextWarnState>();
-	/** Per-session plan-mode override. Sticky until toggled off or session changes. In-memory. */
+	/** Per-session plan-mode override. One-shot: resets to false after the plan-mode turn finishes. In-memory. */
 	private planModeOn = false;
+	/** Tracks whether the current in-flight turn was started in plan mode, so handleTurnFinished knows to reset the toggle. */
+	private currentTurnUsedPlanMode = false;
 
 	constructor(leaf: WorkspaceLeaf, private plugin: ClaudeCodePlugin) {
 		super(leaf);
@@ -310,6 +313,7 @@ export class ChatView extends ItemView {
 		record.turns.push(assistantTurn);
 		this.transcript.beginAssistantTurn(assistantTurn, record.turns.length - 1);
 
+		this.currentTurnUsedPlanMode = this.planModeOn;
 		this.coordinator.startTurn(prompt, finalContext?.contentHash, {
 			permissionMode: this.planModeOn ? "plan" : undefined,
 		});
@@ -355,12 +359,16 @@ export class ChatView extends ItemView {
 				);
 				if (result.kind !== "warn") return;
 				markContextWarnDelivered(state, result.thresholdTokens);
-				const usedK = Math.round(result.usedTokens / 1000);
-				const thresholdK = Math.round(result.thresholdTokens / 1000);
-				const sizeK = Math.round(this.plugin.settings.modelContextSize / 1000);
-				this.transcript.appendSystemNotice(
-					`Conversation is using ~${usedK}k tokens — past the ${result.percent}% mark of the ${sizeK}k context window (threshold ${thresholdK}k). Consider /compact, forking, or starting a new chat soon.`,
-				);
+				const usedFmt = formatTokens(result.usedTokens);
+				const thresholdFmt = formatTokens(result.thresholdTokens);
+				const sizeFmt = formatTokens(this.plugin.settings.modelContextSize);
+				const message = `Conversation is using ~${usedFmt} tokens — past the ${result.percent}% mark of the ${sizeFmt} context window (threshold ${thresholdFmt}). Consider /compact, forking, or starting a new chat soon.`;
+				// Dual surface: transcript notice for the historical record,
+				// Notice toast so the user actually sees it. The transcript
+				// alone reads as a small muted line — easy to miss in a long
+				// chat.
+				this.transcript.appendSystemNotice(message);
+				new Notice(message, 8000);
 			},
 		};
 	}
@@ -585,6 +593,15 @@ export class ChatView extends ItemView {
 		this.transcript.finalizeTurn();
 		if (outcome.kind === "completed" || outcome.kind === "aborted" || outcome.kind === "denied_inline" || outcome.kind === "error") {
 			void this.refreshContext();
+		}
+		// Plan mode is one-shot per use: after a turn that ran in plan mode
+		// settles (Claude proposed a plan and the user approved/rejected, or
+		// the turn errored/aborted), flip the toggle back off so the next
+		// turn doesn't re-plan unless the user explicitly re-enables it.
+		if (this.currentTurnUsedPlanMode) {
+			this.currentTurnUsedPlanMode = false;
+			this.planModeOn = false;
+			this.composer.refreshPlanModeBtn();
 		}
 		// First completed turn after a fork: the CLI now owns the inherited
 		// context, so the marker can drop. Clearing on any non-stale outcome
