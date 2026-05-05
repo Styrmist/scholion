@@ -18,6 +18,12 @@ import { applyDecision } from "./permissions";
 import type { SessionRecord } from "./store";
 import { summarizeLastAssistantTurn } from "./summarize";
 import { ToolIndex } from "./toolIndex";
+import {
+	partitionQueueByTool,
+	QueuedPermission,
+	shouldBatchSameTool,
+	shouldPauseForCycleCap,
+} from "./turnGuards";
 import { canTransition, TurnLease, TurnState } from "./turnState";
 
 const LOST_SESSION_PATTERN = /session.*not\s*found|unknown\s*session|no\s*conversation\s*found/i;
@@ -81,7 +87,7 @@ export class TurnCoordinator {
 	 * Same-tool entries here are drained into the active prompt as a batch when
 	 * one opens.
 	 */
-	private permissionQueue: Array<{ toolUseId: string; toolName: string }> = [];
+	private permissionQueue: QueuedPermission[] = [];
 
 	/**
 	 * Per-turn tool_use counter. Reset at each `runTurn`. Compared against
@@ -157,7 +163,7 @@ export class TurnCoordinator {
 		if (this.state.kind === "awaiting_permission") {
 			// Same-tool sibling arriving while a prompt is open: batch into the
 			// active prompt so the user's single decision covers all of them.
-			if (this.state.pending.tool === toolName && this.cycleCapHeld === null) {
+			if (shouldBatchSameTool(this.state.pending.tool, toolName, this.cycleCapHeld !== null)) {
 				logger.log("[coord] beginHookWait: batching same-tool sibling into active prompt", {
 					toolUseId,
 					tool: toolName,
@@ -200,11 +206,7 @@ export class TurnCoordinator {
 		// cap defending against runaway Edit/Write/Bash loops is the right
 		// scope anyway.
 		const cap = this.plugin.settings.maxToolCallsPerTurn;
-		if (
-			cap > 0 &&
-			this.toolUseCountThisTurn > cap &&
-			this.cycleCapHeld === null
-		) {
+		if (shouldPauseForCycleCap(this.toolUseCountThisTurn, cap, this.cycleCapHeld !== null)) {
 			logger.log("[coord] beginHookWait: cycle cap hit, holding tool", {
 				toolUseId,
 				toolName,
@@ -267,14 +269,8 @@ export class TurnCoordinator {
 	private openPermissionPrompt(toolUseId: string, toolName: string, lease: TurnLease): void {
 		// Drain any same-tool entries already queued so the prompt represents
 		// the full pending batch from the start.
-		const batched: string[] = [];
-		this.permissionQueue = this.permissionQueue.filter((entry) => {
-			if (entry.toolName === toolName) {
-				batched.push(entry.toolUseId);
-				return false;
-			}
-			return true;
-		});
+		const { matching: batched, remaining } = partitionQueueByTool(this.permissionQueue, toolName);
+		this.permissionQueue = remaining;
 		this.transitionTo({
 			kind: "awaiting_permission",
 			lease,
