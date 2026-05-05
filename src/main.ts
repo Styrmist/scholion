@@ -35,6 +35,9 @@ export default class ClaudeCodePlugin extends Plugin {
 
 		this.ensurePluginDirs();
 		this.migrateLegacyTmpDir();
+		try { this.installer.cleanupStaleArtifacts(); } catch (e) {
+			logger.warn("cleanup of stale install artifacts failed", e);
+		}
 		void installHookScript(resolvePaths(this).hookScriptPath).catch((e) => {
 			logger.error("failed to install hook script", e);
 		});

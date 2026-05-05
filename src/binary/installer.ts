@@ -1,7 +1,7 @@
 import { spawn } from "child_process";
 import { chmodSync, existsSync, promises as fsp, renameSync, unlinkSync } from "fs";
 import { Notice } from "obsidian";
-import { PARTIAL_STALE_AGE_MS } from "../constants";
+import { PARTIAL_STALE_AGE_MS, STALE_PREVIOUS_BINARY_AGE_MS } from "../constants";
 import type ClaudeCodePlugin from "../main";
 import { ClaudePlatform, InstalledRecord } from "../types";
 import { atomicWriteJson, ensureDir, fileAgeMs, downloadToFileWithHash, readJsonIfExists } from "../utils/fs";
@@ -43,12 +43,24 @@ export class BinaryInstaller {
 	}
 
 	async ensureBinary(): Promise<{ path: string; version: string }> {
-		this.cleanupStalePartial();
+		this.cleanupStaleArtifacts();
 		const version = await this.getInstalledVersion();
 		if (version) {
 			return { path: this.paths.binaryPath, version };
 		}
 		throw new BinaryNotInstalledError();
+	}
+
+	/**
+	 * Idempotent sweep for leftover install artifacts. Safe to call from plugin
+	 * load and from `ensureBinary`. On Windows the previous-binary file can stay
+	 * locked by a running Obsidian, so an in-place upgrade leaves it on disk —
+	 * we retry-unlink anything older than 24h. The partial-download sweep is
+	 * cross-platform.
+	 */
+	cleanupStaleArtifacts(): void {
+		this.cleanupStalePartial();
+		this.cleanupStalePreviousBinary();
 	}
 
 	async install(opts: { version?: string; onProgress?: (p: InstallProgress) => void } = {}): Promise<InstalledRecord> {
@@ -147,6 +159,28 @@ export class BinaryInstaller {
 		}
 	}
 
+	/**
+	 * Windows-only: a failed/aborted install can leave `claude.prev.exe` on
+	 * disk while Obsidian holds a lock on the spawned binary. Drop anything
+	 * older than 24h. `EBUSY`/`EPERM` are expected when the file is still in
+	 * use by a sibling process and must not be surfaced as errors.
+	 */
+	private cleanupStalePreviousBinary(): void {
+		if (!isWindows()) return;
+		const path = this.paths.previousBinaryPath;
+		if (!existsSync(path)) return;
+		const age = fileAgeMs(path);
+		if (!shouldRemoveStalePreviousBinary(age, STALE_PREVIOUS_BINARY_AGE_MS)) return;
+		try {
+			unlinkSync(path);
+		} catch (e) {
+			const code = (e as NodeJS.ErrnoException).code;
+			if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOENT") {
+				logger.warn("could not remove stale claude.prev.exe", e);
+			}
+		}
+	}
+
 	private selfCheck(): Promise<boolean> {
 		return new Promise((resolve) => {
 			const child = spawn(this.paths.binaryPath, ["--version"], {
@@ -174,4 +208,15 @@ export class BinaryNotInstalledError extends Error {
 		super("Claude Code binary is not installed. Open the plugin settings and click Install.");
 		this.name = "BinaryNotInstalledError";
 	}
+}
+
+/**
+ * Pure decision: should we remove a previous-binary file based on its age?
+ * `ageMs === null` means we couldn't stat it (file disappeared between
+ * existsSync and stat, or some other transient FS hiccup) — be conservative
+ * and skip. Otherwise drop anything past the threshold.
+ */
+export function shouldRemoveStalePreviousBinary(ageMs: number | null, thresholdMs: number): boolean {
+	if (ageMs === null) return false;
+	return ageMs > thresholdMs;
 }

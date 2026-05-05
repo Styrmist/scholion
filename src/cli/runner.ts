@@ -1,5 +1,6 @@
 import { ChildProcess, spawn } from "child_process";
 import type ClaudeCodePlugin from "../main";
+import { PROMPT_VIA_STDIN_THRESHOLD_BYTES } from "../constants";
 import { SendOptions, SendResult } from "../types";
 import * as logger from "../utils/log";
 import { wireAbort } from "./abort";
@@ -14,14 +15,17 @@ export class ClaudeRunner {
 	constructor(private plugin: ClaudeCodePlugin) {}
 
 	async send(opts: SendOptions): Promise<SendResult> {
-		const args = this.buildArgs(opts);
+		const promptBytes = Buffer.byteLength(opts.prompt, "utf8");
+		const viaStdin = shouldSendPromptViaStdin(promptBytes, process.platform);
+		const args = buildArgs(opts, { promptViaStdin: viaStdin });
 		const env = this.buildEnv(opts.configDir);
 
 		logger.log("Spawning claude", {
 			argsCount: args.length,
 			cwd: opts.cwd,
 			configDir: opts.configDir,
-			promptBytes: opts.prompt.length,
+			promptBytes,
+			promptViaStdin: viaStdin,
 			model: opts.model,
 			resume: opts.resumeSessionId,
 		});
@@ -30,11 +34,18 @@ export class ClaudeRunner {
 		const child = spawn(opts.binaryPath, args, {
 			cwd: opts.cwd,
 			env,
-			stdio: ["ignore", "pipe", "pipe"],
+			stdio: [viaStdin ? "pipe" : "ignore", "pipe", "pipe"],
 			windowsHide: true,
 		});
 		child.on("error", (err) => { spawnErrorBox.error = err; });
 		this.active.add(child);
+
+		if (viaStdin && child.stdin) {
+			child.stdin.on("error", (err) => {
+				logger.warn("claude stdin write failed", err);
+			});
+			child.stdin.end(opts.prompt, "utf8");
+		}
 
 		const aborter = wireAbort(child, opts.signal);
 		const stderrChunks: string[] = [];
@@ -84,21 +95,22 @@ export class ClaudeRunner {
 		this.active.clear();
 	}
 
-	private buildArgs(opts: SendOptions): string[] {
-		return buildArgs(opts);
-	}
-
 	private buildEnv(configDir: string): NodeJS.ProcessEnv {
 		const paths = resolvePaths(this.plugin);
 		return buildIsolatedEnv({ configDir, tmpDir: paths.tmpDir });
 	}
 }
 
-export function buildArgs(opts: SendOptions): string[] {
+export interface BuildArgsOptions {
+	/** When true, `-p` is passed without a positional prompt; caller pipes the prompt via stdin. */
+	promptViaStdin?: boolean;
+}
+
+export function buildArgs(opts: SendOptions, buildOpts: BuildArgsOptions = {}): string[] {
 	// cwd is set via spawn's options.cwd — there is no --cwd flag.
-	const args: string[] = [
-		"-p",
-		opts.prompt,
+	const args: string[] = ["-p"];
+	if (!buildOpts.promptViaStdin) args.push(opts.prompt);
+	args.push(
 		"--output-format",
 		"stream-json",
 		"--verbose",
@@ -106,7 +118,7 @@ export function buildArgs(opts: SendOptions): string[] {
 		"--include-hook-events",
 		"--settings",
 		opts.settingsJson,
-	];
+	);
 	if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
 	// Permission lists are now consulted by the PreToolUse hook (HookServer)
 	// instead of being passed to the CLI directly. The CLI's `--allowedTools`
@@ -116,4 +128,15 @@ export function buildArgs(opts: SendOptions): string[] {
 		args.push("--append-system-prompt", opts.systemPromptAddendum);
 	}
 	return args;
+}
+
+/**
+ * Windows' CreateProcessW caps the full command line around 32K UTF-16 chars,
+ * so very long prompts (e.g. a pasted note) overflow argv. macOS/Linux limits
+ * are an order of magnitude higher and not a real concern in practice. When
+ * over the threshold we omit the positional prompt and feed it via stdin.
+ */
+export function shouldSendPromptViaStdin(promptByteLength: number, platform: NodeJS.Platform): boolean {
+	if (platform !== "win32") return false;
+	return promptByteLength > PROMPT_VIA_STDIN_THRESHOLD_BYTES;
 }

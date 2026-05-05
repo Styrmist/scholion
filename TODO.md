@@ -52,8 +52,8 @@ Deferred from the system-temp IPC migration ([src/permissions/hookServer.ts](src
 
 ## Cross-platform
 
-- [ ] **Windows argv length cap (~32 KB).** Long pasted notes overflow. Fallback path: when prompt > 20 KB, write to `<plugin>/tmp/turn-<n>.txt` and feed via stdin (`-p` reads stdin if no positional arg) or use `--prompt-file` if it lands in the CLI.
-- [ ] **Stale `claude.prev` cleanup on Windows.** A failed install can leave a file that's locked while Obsidian is running. Add a startup pass that retries unlinking files older than 24 h.
+- [x] **Windows argv length cap (~32 KB).** When the prompt exceeds 20 KB UTF-8 bytes on `win32`, the runner now omits the positional prompt and pipes it to the CLI's stdin (`claude -p` with no positional arg reads stdin). macOS/Linux behavior unchanged. See [docs/smoke-checks/0.9.0-cross-platform.md](docs/smoke-checks/0.9.0-cross-platform.md) for verification steps.
+- [x] **Stale `claude.prev` cleanup on Windows.** `BinaryInstaller.cleanupStaleArtifacts()` now runs on plugin load and at the start of `ensureBinary`; on Windows it removes any `claude.prev.exe` older than 24 h, swallowing `EBUSY`/`EPERM` when the file is still locked. Verification steps in the smoke-check doc above.
 - [ ] Cross-platform smoke test (macOS x64, Linux glibc x64, Linux musl, Windows x64) — only macOS arm64 has been exercised.
 - [x] iCloud-synced vault path with spaces and unicode — current dev vault has both; full end-to-end usage across v0.2.0–v0.3.x has worked without sync issues.
 
@@ -67,3 +67,4 @@ Deferred from the system-temp IPC migration ([src/permissions/hookServer.ts](src
 - [x] **Group requests so allow applies to a batch.** Same-tool sibling hooks arriving while a permission prompt is open now batch into the active prompt; the user's single decision (Allow once / session / always / Deny) covers all of them. Prompt lists every input and switches button labels to "Allow all once" / "Deny all" so the scope is explicit. Drains queued same-tool entries into a fresh prompt when one opens. Companions in the same release: per-session cost guard (warn + hard cap with one-time bypass) and per-turn `tool_use` cap that pauses the next hook-gated tool with a Continue / Stop transcript prompt.
 - [ ] Prepare some CLAUDE.md/AGENTS.md to optimise assistant usage
 - [ ] select between current claude code approach (donwloaded separate copy) vs preinstalled by user
+- [ ] Auto-get model context window size, show it's fullness and give user ability to compact it + auto-compact on some percentage.

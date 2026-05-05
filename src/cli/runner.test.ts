@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildArgs } from "./runner";
+import { buildArgs, shouldSendPromptViaStdin } from "./runner";
+import { PROMPT_VIA_STDIN_THRESHOLD_BYTES } from "../constants";
 import { SendOptions } from "../types";
 
 function mkOpts(overrides: Partial<SendOptions> = {}): SendOptions {
@@ -78,5 +79,44 @@ describe("buildArgs", () => {
 		const idx = args.indexOf("--settings");
 		expect(idx).toBeGreaterThanOrEqual(0);
 		expect(args[idx + 1]).toBe(json);
+	});
+
+	it("omits the positional prompt when promptViaStdin is true (CLI reads stdin instead)", () => {
+		const args = buildArgs(mkOpts({ prompt: "long-prompt-goes-here" }), { promptViaStdin: true });
+		expect(args[0]).toBe("-p");
+		expect(args).not.toContain("long-prompt-goes-here");
+		expect(args[1]).toBe("--output-format");
+	});
+
+	it("still passes resume/model flags when promptViaStdin is true", () => {
+		const args = buildArgs(
+			mkOpts({ prompt: "x", resumeSessionId: "sess-9", model: "opus" }),
+			{ promptViaStdin: true },
+		);
+		expect(args).toContain("--resume");
+		expect(args[args.indexOf("--resume") + 1]).toBe("sess-9");
+		expect(args).toContain("--model");
+	});
+});
+
+describe("shouldSendPromptViaStdin", () => {
+	it("never triggers on darwin or linux regardless of size", () => {
+		expect(shouldSendPromptViaStdin(0, "darwin")).toBe(false);
+		expect(shouldSendPromptViaStdin(1_000_000, "darwin")).toBe(false);
+		expect(shouldSendPromptViaStdin(1_000_000, "linux")).toBe(false);
+	});
+
+	it("does not trigger on win32 below the threshold", () => {
+		expect(shouldSendPromptViaStdin(0, "win32")).toBe(false);
+		expect(shouldSendPromptViaStdin(PROMPT_VIA_STDIN_THRESHOLD_BYTES, "win32")).toBe(false);
+	});
+
+	it("triggers on win32 above the threshold", () => {
+		expect(shouldSendPromptViaStdin(PROMPT_VIA_STDIN_THRESHOLD_BYTES + 1, "win32")).toBe(true);
+		expect(shouldSendPromptViaStdin(PROMPT_VIA_STDIN_THRESHOLD_BYTES * 4, "win32")).toBe(true);
+	});
+
+	it("threshold is 20 KiB so non-ASCII prompts still fit under Windows' ~32K UTF-16 cap", () => {
+		expect(PROMPT_VIA_STDIN_THRESHOLD_BYTES).toBe(20 * 1024);
 	});
 });

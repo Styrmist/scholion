@@ -55,6 +55,19 @@ export const TOOL_OUTPUT_PREVIEW_BYTES = 4096;
 export const PARTIAL_STALE_AGE_MS = 60_000;
 export const MAX_DIAGNOSTICS_PER_SESSION = 500;
 
+// Windows CreateProcessW caps the command line near 32K UTF-16 chars. Once
+// fixed args (paths, flags) are accounted for, ~20K UTF-8 bytes of prompt is
+// the largest we can safely pass positionally; beyond that we feed the CLI
+// the prompt over stdin (`claude -p` reads stdin when no positional prompt
+// is given). Threshold is intentionally well below the hard limit so that
+// non-ASCII prompts (UTF-8 expanding to 2-4 bytes) still fit.
+export const PROMPT_VIA_STDIN_THRESHOLD_BYTES = 20 * 1024;
+
+// Windows leaves the previous-binary file (`claude.prev.exe`) locked while
+// Obsidian is running, so an in-place upgrade can't remove it. We sweep any
+// older-than-24h leftovers on plugin load.
+export const STALE_PREVIOUS_BINARY_AGE_MS = 24 * 60 * 60 * 1000;
+
 // Hook IPC: the hook script's inner timeout MUST be smaller than the CLI's outer
 // timeout, because the CLI fails OPEN on its timeout (would silently allow the
 // tool). The script's inner timeout fails DENY — that's the safe default if the
