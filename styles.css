@@ -292,6 +292,35 @@
 	color: var(--color-red);
 }
 
+.cc-perm__batch {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin: 4px 0 8px;
+	max-height: 280px;
+	overflow-y: auto;
+}
+
+.cc-perm__batch-note {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	margin: 0 0 8px;
+}
+
+.cc-turn--interactive {
+	text-align: left;
+}
+
+.cc-turn--interactive .cc-perm-actions {
+	margin-top: 6px;
+	justify-content: center;
+}
+
+.cc-turn__text--muted {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
 .cc-composer {
 	border-top: 1px solid var(--background-modifier-border);
 	padding: 8px;

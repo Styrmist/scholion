@@ -2,11 +2,17 @@
 export type TurnLease = number;
 
 export interface PendingPermissionState {
-	/** The tool's tool_use_id; used for both card identification and HookServer.respond. */
+	/** The primary tool_use_id. Drives the visible tool card and decidePermission lookups. */
 	placeholderToolUseId: string;
 	tool: string;
 	/** Always set in the current implementation; reserved for future correlation with stream hook events. */
 	hookId: string;
+	/**
+	 * Additional tool_use_ids batched into this prompt. Same tool name as the primary,
+	 * arrived while the prompt was open, or drained from the queue at open time. The
+	 * user's decision applies to all of them with one click. Empty when no batch.
+	 */
+	batchedToolUseIds: string[];
 }
 
 /** Explicit state machine for an in-flight (or idle) turn. */

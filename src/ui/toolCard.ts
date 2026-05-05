@@ -90,7 +90,10 @@ export class ToolCard {
 		this.viewFullBtn.setText(`View full output (${formatBytes(this.fullOutput.length)})`);
 	}
 
-	requestPermission(onDecide: (decision: PermissionDecision) => void): void {
+	requestPermission(
+		onDecide: (decision: PermissionDecision) => void,
+		batchedInputs: unknown[] = [],
+	): void {
 		this.setStatus("pending_permission");
 		if (!this.permissionEl) {
 			this.permissionEl = this.bodyEl.createDiv();
@@ -98,6 +101,7 @@ export class ToolCard {
 		renderPermissionPrompt(this.permissionEl, {
 			tool: this.tool,
 			input: this.input,
+			batchedInputs,
 			onDecide: (decision) => {
 				this.permissionEl?.remove();
 				this.permissionEl = null;

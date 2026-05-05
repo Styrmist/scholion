@@ -29,16 +29,35 @@ export type TurnOutcome =
 	| { kind: "denied_inline" }
 	| { kind: "stale" };
 
+export interface CycleCapPrompt {
+	count: number;
+	cap: number;
+	onContinue: () => void;
+	onStop: () => void;
+}
+
 export interface CoordinatorEvents {
 	onStateChange(state: TurnState): void;
 	onStreamEvent(event: StreamEvent): void;
 	onDiagnostic(entry: DiagnosticEntry, record: SessionRecord): void;
 	onUsageChanged(record: SessionRecord): void;
 	onSystemNotice(message: string): void;
-	onPermissionRequired(toolUseId: string): void;
+	/**
+	 * The primary card identified by toolUseId needs a permission decision.
+	 * `batchedToolUseIds` lists same-tool sibling cards whose hooks are paused
+	 * and will receive the same decision; the UI should suppress per-card
+	 * prompts on those cards and surface the batch count in the primary prompt.
+	 */
+	onPermissionRequired(toolUseId: string, batchedToolUseIds: string[]): void;
 	onPermissionGranted(toolUseId: string): void;
 	onAborted(): void;
 	onTurnFinished(outcome: TurnOutcome): void;
+	/**
+	 * Tool-call cap reached during the active turn. The CLI hook for the next
+	 * tool is paused. UI should surface a Continue / Stop choice; selecting
+	 * one calls back through the supplied callbacks.
+	 */
+	onCycleCapReached(prompt: CycleCapPrompt): void;
 }
 
 /**
@@ -59,8 +78,24 @@ export class TurnCoordinator {
 	 * Pending hook escalations queued while another permission prompt is open.
 	 * Claude can emit parallel tool calls and the CLI invokes hooks for each
 	 * concurrently; we serialize the prompts so the user decides one at a time.
+	 * Same-tool entries here are drained into the active prompt as a batch when
+	 * one opens.
 	 */
 	private permissionQueue: Array<{ toolUseId: string; toolName: string }> = [];
+
+	/**
+	 * Per-turn tool_use counter. Reset at each `runTurn`. Compared against
+	 * `settings.maxToolCallsPerTurn` to decide whether to pause at the next
+	 * hook-gated tool.
+	 */
+	private toolUseCountThisTurn = 0;
+	/**
+	 * When the cycle cap fires, we hold the next hook here instead of routing
+	 * into the regular permission prompt. The UI's Continue / Stop choice
+	 * resolves the held entry by allowing the regular flow to run, or by
+	 * denying + aborting.
+	 */
+	private cycleCapHeld: { toolUseId: string; toolName: string; lease: TurnLease } | null = null;
 
 	constructor(
 		private plugin: ClaudeCodePlugin,
@@ -73,6 +108,7 @@ export class TurnCoordinator {
 		if (this.record === record) return;
 		this.invalidateLease();
 		this.drainQueueWithDeny("Session switched before decision");
+		this.releaseCycleCapHeld("deny", "Session switched");
 		this.record = record;
 		this.toolIndex.clear();
 		if (record) this.toolIndex.rebuildFrom(record);
@@ -94,6 +130,8 @@ export class TurnCoordinator {
 	startTurn(prompt: string, contextHashToCommit: string | undefined): void {
 		const record = this.record;
 		if (!record) return;
+		this.toolUseCountThisTurn = 0;
+		this.cycleCapHeld = null;
 		void this.runTurn(record, prompt, contextHashToCommit, this.mintLease());
 	}
 
@@ -117,7 +155,31 @@ export class TurnCoordinator {
 		}
 
 		if (this.state.kind === "awaiting_permission") {
+			// Same-tool sibling arriving while a prompt is open: batch into the
+			// active prompt so the user's single decision covers all of them.
+			if (this.state.pending.tool === toolName && this.cycleCapHeld === null) {
+				logger.log("[coord] beginHookWait: batching same-tool sibling into active prompt", {
+					toolUseId,
+					tool: toolName,
+				});
+				this.state.pending.batchedToolUseIds.push(toolUseId);
+				this.events.onPermissionRequired(
+					this.state.pending.placeholderToolUseId,
+					this.state.pending.batchedToolUseIds,
+				);
+				return true;
+			}
 			logger.log("[coord] beginHookWait: already awaiting, queueing", { toolUseId, queueLen: this.permissionQueue.length });
+			this.permissionQueue.push({ toolUseId, toolName });
+			return true;
+		}
+
+		// While the cycle-cap prompt is pending, more siblings may arrive (the
+		// CLI keeps streaming and emits hooks for the next tools in the batch).
+		// Defer them into the queue; openPermissionPrompt at Continue time will
+		// drain same-tool siblings from the queue into the prompt batch.
+		if (this.cycleCapHeld !== null) {
+			logger.log("[coord] beginHookWait: cycle-cap held, queueing sibling", { toolUseId, toolName });
 			this.permissionQueue.push({ toolUseId, toolName });
 			return true;
 		}
@@ -130,12 +192,89 @@ export class TurnCoordinator {
 			logger.log("[coord] beginHookWait: unexpected state, rejecting", { state: this.state.kind, toolUseId });
 			return false;
 		}
+
+		// Cycle-cap pause point. The hook subprocess is already paused waiting
+		// for our .resp file, so holding off on `respond` here is what actually
+		// pauses the CLI. Fast-path tools (Read/Grep/Glob) bypass this — but
+		// fast-path tools are by definition pre-approved by the user, so the
+		// cap defending against runaway Edit/Write/Bash loops is the right
+		// scope anyway.
+		const cap = this.plugin.settings.maxToolCallsPerTurn;
+		if (
+			cap > 0 &&
+			this.toolUseCountThisTurn > cap &&
+			this.cycleCapHeld === null
+		) {
+			logger.log("[coord] beginHookWait: cycle cap hit, holding tool", {
+				toolUseId,
+				toolName,
+				count: this.toolUseCountThisTurn,
+				cap,
+			});
+			this.cycleCapHeld = { toolUseId, toolName, lease };
+			this.events.onCycleCapReached({
+				count: this.toolUseCountThisTurn,
+				cap,
+				onContinue: () => this.resolveCycleCapContinue(),
+				onStop: () => this.resolveCycleCapStop(),
+			});
+			return true;
+		}
+
 		logger.log("[coord] beginHookWait: opening prompt", { toolUseId });
 		this.openPermissionPrompt(toolUseId, toolName, lease);
 		return true;
 	}
 
+	/**
+	 * User clicked Continue on the cycle-cap prompt. Reset the per-turn counter
+	 * and route the held tool through the regular permission flow as if the
+	 * cap had not fired.
+	 */
+	private resolveCycleCapContinue(): void {
+		const held = this.cycleCapHeld;
+		if (!held) return;
+		if (!this.isLeaseValid(held.lease)) {
+			// Turn ended while the user deliberated; deny the held hook.
+			this.plugin.hookServer.respond(held.toolUseId, "deny", "Turn ended");
+			this.cycleCapHeld = null;
+			return;
+		}
+		this.toolUseCountThisTurn = 0;
+		this.cycleCapHeld = null;
+		this.openPermissionPrompt(held.toolUseId, held.toolName, held.lease);
+	}
+
+	/** User clicked Stop. Deny the held hook and abort the turn. */
+	private resolveCycleCapStop(): void {
+		const held = this.cycleCapHeld;
+		if (!held) return;
+		this.plugin.hookServer.respond(held.toolUseId, "deny", "Tool-call cap reached; user stopped");
+		const block = this.record ? this.toolIndex.resolve(this.record, held.toolUseId) : null;
+		if (block) block.status = "denied";
+		this.cycleCapHeld = null;
+		this.abort();
+	}
+
+	/** Release any held cycle-cap entry (used during session switch / unbind). */
+	private releaseCycleCapHeld(decision: "allow" | "deny", reason: string): void {
+		const held = this.cycleCapHeld;
+		if (!held) return;
+		this.plugin.hookServer.respond(held.toolUseId, decision, reason);
+		this.cycleCapHeld = null;
+	}
+
 	private openPermissionPrompt(toolUseId: string, toolName: string, lease: TurnLease): void {
+		// Drain any same-tool entries already queued so the prompt represents
+		// the full pending batch from the start.
+		const batched: string[] = [];
+		this.permissionQueue = this.permissionQueue.filter((entry) => {
+			if (entry.toolName === toolName) {
+				batched.push(entry.toolUseId);
+				return false;
+			}
+			return true;
+		});
 		this.transitionTo({
 			kind: "awaiting_permission",
 			lease,
@@ -145,9 +284,10 @@ export class TurnCoordinator {
 				// `hookId` is just a discriminator selecting the hook code path
 				// in decidePermission; we reuse toolUseId since they're 1:1.
 				hookId: toolUseId,
+				batchedToolUseIds: batched,
 			},
 		});
-		this.events.onPermissionRequired(toolUseId);
+		this.events.onPermissionRequired(toolUseId, batched);
 	}
 
 	private dequeueNextPermission(): void {
@@ -204,14 +344,18 @@ export class TurnCoordinator {
 
 	abort(): void {
 		this.drainQueueWithDeny("Turn aborted");
+		this.releaseCycleCapHeld("deny", "Turn aborted");
 		if (this.state.kind === "awaiting_permission") {
 			const pending = this.state.pending;
 			const record = this.record;
-			if (record) {
-				const block = this.toolIndex.resolve(record, pending.placeholderToolUseId);
-				if (block) block.status = "denied";
+			const allIds = [pending.placeholderToolUseId, ...pending.batchedToolUseIds];
+			for (const id of allIds) {
+				if (record) {
+					const block = this.toolIndex.resolve(record, id);
+					if (block) block.status = "denied";
+				}
+				this.plugin.hookServer.respond(id, "deny", "Turn aborted");
 			}
-			this.plugin.hookServer.respond(pending.placeholderToolUseId, "deny", "Turn aborted");
 			this.transitionTo({ kind: "idle" });
 		}
 		if (this.abortController) {
@@ -237,6 +381,7 @@ export class TurnCoordinator {
 			return;
 		}
 		const lease = this.state.lease;
+		const batchedIds = pending.batchedToolUseIds;
 
 		const block = this.toolIndex.resolve(record, toolUseId);
 		if (!block) {
@@ -244,8 +389,13 @@ export class TurnCoordinator {
 			return;
 		}
 
-		logger.log("[coord] decidePermission applying", { toolUseId, decision, tool: block.tool });
-		await this.applyHookDecision(record, block.tool, toolUseId, decision, lease);
+		logger.log("[coord] decidePermission applying", {
+			toolUseId,
+			decision,
+			tool: block.tool,
+			batchedCount: batchedIds.length,
+		});
+		await this.applyHookDecision(record, block.tool, toolUseId, batchedIds, decision, lease);
 	}
 
 	/**
@@ -256,16 +406,21 @@ export class TurnCoordinator {
 		record: SessionRecord,
 		tool: string,
 		toolUseId: string,
+		batchedIds: string[],
 		decision: PermissionDecision,
 		lease: TurnLease,
 	): Promise<void> {
+		const allIds = [toolUseId, ...batchedIds];
 		if (decision === "deny") {
-			this.plugin.hookServer.respond(toolUseId, "deny", "User denied via Obsidian plugin");
-			const denyBlock = this.toolIndex.resolve(record, toolUseId);
-			if (denyBlock) denyBlock.status = "denied";
+			for (const id of allIds) {
+				this.plugin.hookServer.respond(id, "deny", "User denied via Obsidian plugin");
+				const denyBlock = this.toolIndex.resolve(record, id);
+				if (denyBlock) denyBlock.status = "denied";
+			}
 			this.plugin.sessions.scheduleSave(record);
-			// "deny once" affects only this call; do NOT add to record.permissions.deniedTools
-			// (that would be "deny always" semantics — out of scope for this prompt).
+			// "deny once" affects only these specific calls; do NOT add to
+			// record.permissions.deniedTools (that would be "deny always"
+			// semantics — out of scope for this prompt).
 			this.transitionTo({ kind: "streaming", lease, sawAssistantOutput: true });
 			this.dequeueNextPermission();
 			return;
@@ -279,16 +434,20 @@ export class TurnCoordinator {
 			await this.plugin.saveSettings();
 			if (!this.isLeaseValid(lease) || this.record !== record) {
 				// User switched sessions while saveSettings() was awaited.
-				this.plugin.hookServer.respond(toolUseId, "deny", "Session switched during decision");
+				for (const id of allIds) {
+					this.plugin.hookServer.respond(id, "deny", "Session switched during decision");
+				}
 				this.drainQueueWithDeny("Session switched during decision");
 				return;
 			}
 		}
 		this.plugin.sessions.scheduleSave(record);
-		this.plugin.hookServer.respond(toolUseId, "allow");
-		// CLI will continue and emit tool_result; the existing card flips back to running.
-		const allowBlock = this.toolIndex.resolve(record, toolUseId);
-		if (allowBlock) allowBlock.status = "running";
+		for (const id of allIds) {
+			this.plugin.hookServer.respond(id, "allow");
+			const allowBlock = this.toolIndex.resolve(record, id);
+			if (allowBlock) allowBlock.status = "running";
+		}
+		// CLI will continue and emit tool_result for each id; cards flip back to running.
 		this.events.onPermissionGranted(toolUseId);
 		this.transitionTo({ kind: "tool_running", lease, toolName: tool, sawAssistantOutput: true });
 		this.dequeueNextPermission();
@@ -360,6 +519,7 @@ export class TurnCoordinator {
 				this.events.onUsageChanged(record);
 			}
 			if (event.kind === "tool_use") {
+				this.toolUseCountThisTurn++;
 				// Claude emits all parallel tool_use blocks at once, even though
 				// the CLI invokes their hooks sequentially. If we're currently
 				// holding a permission prompt for an earlier tool, the user is

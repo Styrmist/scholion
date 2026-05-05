@@ -32,10 +32,69 @@ export class ClaudeSettingsTab extends PluginSettingTab {
 		this.renderBinarySection(containerEl);
 		this.renderSafetySection(containerEl);
 		this.renderPermissionsSection(containerEl);
+		this.renderRunawayGuardsSection(containerEl);
 		this.renderModelSection(containerEl);
 		this.renderContextSection(containerEl);
 		this.renderComposerSection(containerEl);
 		this.renderAdvancedSection(containerEl);
+	}
+
+	private renderRunawayGuardsSection(containerEl: HTMLElement): void {
+		new Setting(containerEl).setName("Runaway guards").setHeading();
+
+		new Setting(containerEl)
+			.setName("Cost warning threshold")
+			.setDesc(
+				"Show a one-shot notice when this session's accumulated cost first reaches this dollar amount. 0 disables.",
+			)
+			.addText((t) =>
+				t
+					.setValue(String(this.plugin.settings.costWarnUsd))
+					.setPlaceholder("0")
+					.onChange(async (value) => {
+						const num = Number(value);
+						if (Number.isFinite(num) && num >= 0) {
+							this.plugin.settings.costWarnUsd = num;
+							await this.plugin.saveSettings();
+						}
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Cost hard cap")
+			.setDesc(
+				"Block the next message once this session's spend reaches this dollar amount, until you confirm a one-time bypass. 0 disables.",
+			)
+			.addText((t) =>
+				t
+					.setValue(String(this.plugin.settings.costHardCapUsd))
+					.setPlaceholder("0")
+					.onChange(async (value) => {
+						const num = Number(value);
+						if (Number.isFinite(num) && num >= 0) {
+							this.plugin.settings.costHardCapUsd = num;
+							await this.plugin.saveSettings();
+						}
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Max tool calls per turn")
+			.setDesc(
+				"Pause the turn at the next hook-gated tool once Claude has made this many tool calls in one turn. 0 disables.",
+			)
+			.addText((t) =>
+				t
+					.setValue(String(this.plugin.settings.maxToolCallsPerTurn))
+					.setPlaceholder("100")
+					.onChange(async (value) => {
+						const num = Number(value);
+						if (Number.isFinite(num) && num >= 0) {
+							this.plugin.settings.maxToolCallsPerTurn = Math.floor(num);
+							await this.plugin.saveSettings();
+						}
+					}),
+			);
 	}
 
 	private renderAccountSection(containerEl: HTMLElement): void {

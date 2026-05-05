@@ -3,6 +3,13 @@ import { resolvePaths } from "../binary/paths";
 import { captureActiveContext, CapturedContext } from "../context/activeNote";
 import { buildPrompt, shouldAttach } from "../context/promptBuilder";
 import { VIEW_TYPE_CHAT, RIBBON_ICON } from "../constants";
+import {
+	checkCostGuard,
+	CostGuardState,
+	freshCostGuardState,
+	markCapBypassed,
+	markWarnDelivered,
+} from "../session/costGuard";
 import type { SessionRecord } from "../session/store";
 import { ToolIndex } from "../session/toolIndex";
 import { CoordinatorEvents, TurnCoordinator, TurnOutcome } from "../session/turnCoordinator";
@@ -10,6 +17,7 @@ import { TurnState } from "../session/turnState";
 import { ChatTurn } from "../types";
 import type ClaudeCodePlugin from "../main";
 import { Composer } from "./composer";
+import { confirm } from "./confirmModal";
 import { DiagnosticsPanel } from "./diagnosticsPanel";
 import { SessionPicker } from "./sessionPicker";
 import { StatusPill } from "./statusPill";
@@ -25,6 +33,13 @@ export class ChatView extends ItemView {
 	private currentTurnContext: CapturedContext | null = null;
 	private toolIndex = new ToolIndex();
 	private coordinator!: TurnCoordinator;
+	/**
+	 * Cost-guard state is per active record but transient: it does not survive
+	 * a plugin reload, so a fresh session picks up its own warn/cap progress
+	 * starting from the recorded total cost. WeakMap keys on the record so
+	 * deletion is automatic when sessions are unloaded.
+	 */
+	private costGuardStates = new WeakMap<SessionRecord, CostGuardState>();
 
 	constructor(leaf: WorkspaceLeaf, private plugin: ClaudeCodePlugin) {
 		super(leaf);
@@ -196,6 +211,9 @@ export class ChatView extends ItemView {
 		if (this.coordinator.isBusy()) return;
 		const record = this.currentRecord;
 
+		const guardOk = await this.runCostGuardCheck(record);
+		if (!guardOk) return;
+
 		const context = attachContext ? this.currentTurnContext : null;
 		const previousHash = record.permissions.lastAttached?.contentHash;
 		const willAttach = context !== null && shouldAttach(context, previousHash);
@@ -250,7 +268,8 @@ export class ChatView extends ItemView {
 				if (this.currentRecord === record) this.statusPill.setUsage(record.usage ?? null);
 			},
 			onSystemNotice: (msg) => this.transcript.appendSystemNotice(msg),
-			onPermissionRequired: (toolUseId) => this.transcript.requestPermissionFor(toolUseId),
+			onPermissionRequired: (toolUseId, batched) =>
+				this.transcript.requestPermissionFor(toolUseId, batched),
 			onPermissionGranted: (toolUseId) => {
 				// Card was created from the real tool_use event; keep it. CLI will
 				// run the tool next and emit tool_result, which updates the card.
@@ -258,7 +277,67 @@ export class ChatView extends ItemView {
 			},
 			onAborted: () => this.transcript.markAborted(),
 			onTurnFinished: (outcome) => this.handleTurnFinished(outcome),
+			onCycleCapReached: ({ count, cap, onContinue, onStop }) => {
+				this.transcript.appendInteractiveNotice({
+					message: `Claude has used ${count} tool calls in this turn (cap: ${cap}). Continue or stop?`,
+					actions: [
+						{ label: "Continue", onClick: onContinue },
+						{ label: "Stop", cls: "cc-perm__btn--danger", onClick: onStop },
+					],
+				});
+			},
 		};
+	}
+
+	/**
+	 * Pre-submit cost-guard check. Returns false if the user should be blocked
+	 * from sending (cap reached and not bypassed). Side-effects: shows a one-shot
+	 * warn notice on first crossing of the warn threshold, opens a modal confirm
+	 * on cap crossings to capture the bypass decision.
+	 */
+	private async runCostGuardCheck(record: SessionRecord): Promise<boolean> {
+		const usage = record.usage;
+		if (!usage) return true;
+		const state = this.getCostGuardState(record);
+		const result = checkCostGuard(
+			usage.totalCostUsd,
+			this.plugin.settings.costWarnUsd,
+			this.plugin.settings.costHardCapUsd,
+			state,
+		);
+		if (result.kind === "ok") return true;
+		const cost = result.cost.toFixed(2);
+		const threshold = result.threshold.toFixed(2);
+		if (result.kind === "warn") {
+			markWarnDelivered(state, result.threshold);
+			this.transcript.appendSystemNotice(
+				`Session cost has crossed $${threshold} (current $${cost}). Continuing.`,
+			);
+			return true;
+		}
+		const ok = await confirm(
+			this.app,
+			`This session has spent $${cost}, past your hard cap of $${threshold}. ` +
+				`Send this message anyway? The cap will be bypassed for the rest of the session.`,
+		);
+		if (!ok) {
+			new Notice("Send cancelled — session cost cap reached.");
+			return false;
+		}
+		markCapBypassed(state);
+		this.transcript.appendSystemNotice(
+			`Cost cap of $${threshold} bypassed for this session.`,
+		);
+		return true;
+	}
+
+	private getCostGuardState(record: SessionRecord): CostGuardState {
+		let state = this.costGuardStates.get(record);
+		if (!state) {
+			state = freshCostGuardState();
+			this.costGuardStates.set(record, state);
+		}
+		return state;
 	}
 
 	private applyTurnState(state: TurnState): void {

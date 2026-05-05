@@ -74,4 +74,14 @@ export const HOOK_IPC_DIR_PREFIX = "obsidian-claude-code-";
 
 export const DEFAULT_MAX_ATTACH_KB = 64;
 
+// Safety / cost caps. 0 means "disabled".
+// Cost caps default off — many users are on Claude.ai subscription where
+// per-session $-cap thresholds don't translate cleanly. Users on metered API
+// can opt in via settings.
+export const DEFAULT_COST_WARN_USD = 0;
+export const DEFAULT_COST_HARD_CAP_USD = 0;
+// Tool-call cap defaults active. 100 is well above any single coherent task
+// and well below the runaway-loop danger zone; users can lower it or set 0.
+export const DEFAULT_MAX_TOOL_CALLS_PER_TURN = 100;
+
 export const RIBBON_ICON = "bot";

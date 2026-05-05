@@ -79,6 +79,32 @@ export class TranscriptView {
 		this.scrollToBottom();
 	}
 
+	/**
+	 * Render an interactive notice with one or two action buttons. Used for
+	 * the cycle-cap pause prompt; resolves itself to plain text once the user
+	 * picks an option so the historical transcript stays readable.
+	 */
+	appendInteractiveNotice(args: {
+		message: string;
+		actions: Array<{ label: string; cls?: string; onClick: () => void }>;
+	}): void {
+		const el = this.container.createDiv({ cls: "cc-turn cc-turn--system cc-turn--interactive" });
+		el.createDiv({ cls: "cc-turn__text", text: args.message });
+		const actions = el.createDiv({ cls: "cc-perm-actions" });
+		for (const action of args.actions) {
+			const btn = actions.createEl("button", { text: action.label, cls: "cc-perm__btn" });
+			if (action.cls) btn.addClass(action.cls);
+			btn.addEventListener("click", () => {
+				// Replace the buttons with a frozen "(picked: X)" line so the
+				// notice still tells the story when the user scrolls back later.
+				actions.empty();
+				el.createDiv({ cls: "cc-turn__text cc-turn__text--muted", text: `→ ${action.label}` });
+				action.onClick();
+			});
+		}
+		this.scrollToBottom();
+	}
+
 	beginAssistantTurn(turn: ChatTurn, turnIndex: number): void {
 		const turnEl = this.container.createDiv({ cls: ["cc-turn", "cc-turn--assistant"] });
 		this.active = { turn, turnIndex, containerEl: turnEl, currentBubble: null };
@@ -195,12 +221,28 @@ export class TranscriptView {
 		}
 	}
 
-	requestPermissionFor(toolUseId: string): void {
+	requestPermissionFor(toolUseId: string, batchedToolUseIds: string[] = []): void {
 		const card = this.toolCards.get(toolUseId);
 		if (!card) return;
+		const record = this.recordRef?.();
+		const batchedInputs: unknown[] = [];
+		if (record) {
+			for (const id of batchedToolUseIds) {
+				const block = this.toolIndex.resolve(record, id);
+				if (block) batchedInputs.push(block.input);
+				const sibling = this.toolCards.get(id);
+				// Surface the pending state on sibling cards so the user can see
+				// they're covered by the primary's prompt; no per-sibling buttons.
+				sibling?.setStatus("pending_permission");
+			}
+		}
 		card.requestPermission((decision) => {
+			for (const id of batchedToolUseIds) {
+				const sibling = this.toolCards.get(id);
+				sibling?.setStatus(decision === "deny" ? "denied" : "running");
+			}
 			this.callbacks.onPermissionRequested(toolUseId, decision);
-		});
+		}, batchedInputs);
 	}
 
 	removeToolCard(toolUseId: string): void {

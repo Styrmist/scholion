@@ -57,4 +57,6 @@ Deferred from the system-temp IPC migration ([src/permissions/hookServer.ts](src
 ## Extra
 - [x] Model selection in settings: dropdown with `sonnet` (default), `opus`, `haiku`, `opusplan`, plus a Custom… escape hatch for full model names / inference profile arns / deployment names.
 - [ ] Select text in chat with claude
-- [ ] Group requests so for user allow applys to block of requests. Currently for batch edits (for example) user sees 5 block for edit with buttons in first one but it will approve all requests in batch.
+- [x] **Group requests so allow applies to a batch.** Same-tool sibling hooks arriving while a permission prompt is open now batch into the active prompt; the user's single decision (Allow once / session / always / Deny) covers all of them. Prompt lists every input and switches button labels to "Allow all once" / "Deny all" so the scope is explicit. Drains queued same-tool entries into a fresh prompt when one opens. Companions in the same release: per-session cost guard (warn + hard cap with one-time bypass) and per-turn `tool_use` cap that pauses the next hook-gated tool with a Continue / Stop transcript prompt.
+- [ ] Prepare some CLAUDE.md/AGENTS.md to optimise assistant usage
+- [ ] select between current claude code approach (donwloaded separate copy) vs preinstalled by user
