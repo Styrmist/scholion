@@ -13,6 +13,16 @@ export interface SessionRecord {
 	permissions: PermissionGrants;
 	diagnostics?: DiagnosticEntry[];
 	usage?: SessionUsage;
+	/**
+	 * Marker set on session creation via fork: indicates how many of the
+	 * leading entries in `turns` were inherited from the parent session.
+	 * The first new turn after a fork includes those inherited turns in its
+	 * prompt as a `<previous_conversation>` block so Claude has the context.
+	 * Cleared (set to undefined) after the fork's first turn produces a
+	 * CLI session id, so subsequent turns don't redundantly resend the
+	 * history.
+	 */
+	forkedFromTurns?: number;
 }
 
 interface PendingSave {

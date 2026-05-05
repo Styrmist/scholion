@@ -10,16 +10,31 @@ export interface BuildPromptArgs {
 	 * mentions resolved.
 	 */
 	mentions?: ReadonlyArray<CapturedContext>;
+	/**
+	 * Pre-rendered transcript of inherited turns (typically from a forked
+	 * parent session). Wrapped in a `<previous_conversation>` block so the
+	 * model knows it's prior context, not a fresh user message. Caller is
+	 * responsible for keeping this within their byte budget.
+	 */
+	inheritedConversation?: string;
 }
 
 export function buildPrompt(args: BuildPromptArgs): string {
 	const sections: string[] = [];
+	if (args.inheritedConversation && args.inheritedConversation.trim()) {
+		sections.push(serializeInheritedConversation(args.inheritedConversation));
+	}
 	if (args.context) sections.push(serializeActiveNote(args.context));
 	for (const mention of args.mentions ?? []) {
 		sections.push(serializeMention(mention));
 	}
 	sections.push(`<user_message>\n${args.userText}\n</user_message>`);
 	return sections.join("\n\n");
+}
+
+function serializeInheritedConversation(body: string): string {
+	const safe = body.replace(/<\/previous_conversation>/gi, "<\\/previous_conversation>");
+	return `<previous_conversation>\n${safe}\n</previous_conversation>`;
 }
 
 function serializeActiveNote(ctx: CapturedContext): string {

@@ -9,6 +9,13 @@ import { ToolCard } from "./toolCard";
 
 export interface TranscriptCallbacks {
 	onPermissionRequested: (toolUseId: string, decision: PermissionDecision) => void;
+	/**
+	 * User clicked "Fork from here" on the assistant turn at this index in the
+	 * current record. Index counts every entry in `record.turns` (user +
+	 * assistant alike); the parent's turns up to and including this index
+	 * become the inherited prefix of the new session.
+	 */
+	onForkFromTurn: (turnIndex: number) => void;
 }
 
 interface AssistantTurnContext {
@@ -16,6 +23,8 @@ interface AssistantTurnContext {
 	turnIndex: number;
 	containerEl: HTMLElement;
 	currentBubble: TextBubble | null;
+	/** The fork button rendered on this turn (hidden until the turn finalizes). */
+	forkBtn: HTMLElement | null;
 }
 
 interface TextBubble {
@@ -107,8 +116,26 @@ export class TranscriptView {
 
 	beginAssistantTurn(turn: ChatTurn, turnIndex: number): void {
 		const turnEl = this.container.createDiv({ cls: ["cc-turn", "cc-turn--assistant"] });
-		this.active = { turn, turnIndex, containerEl: turnEl, currentBubble: null };
+		const forkBtn = this.makeForkButton(turnIndex);
+		// Hide while streaming: forking an in-flight turn is undefined behavior
+		// (the CLI subprocess is still running; the parent session would race
+		// with the just-cloned fork). Reveal in finalizeTurn.
+		forkBtn.addClass("cc-hidden");
+		turnEl.appendChild(forkBtn);
+		this.active = { turn, turnIndex, containerEl: turnEl, currentBubble: null, forkBtn };
 		this.scrollToBottom();
+	}
+
+	private makeForkButton(turnIndex: number): HTMLElement {
+		const btn = document.createElement("div");
+		btn.addClass("cc-turn__fork-btn");
+		btn.setText("Fork from here");
+		btn.setAttribute("title", "Start a new chat that branches off after this reply.");
+		btn.addEventListener("click", (ev) => {
+			ev.stopPropagation();
+			this.callbacks.onForkFromTurn(turnIndex);
+		});
+		return btn;
 	}
 
 	handleEvent(event: StreamEvent): void {
@@ -273,6 +300,10 @@ export class TranscriptView {
 	finalizeTurn(): void {
 		const bubble = this.active?.currentBubble;
 		bubble?.stream.finalize().catch(() => undefined);
+		// Reveal the fork affordance once the turn is no longer in flight.
+		// Aborted turns also become forkable — branching off a partial reply
+		// is sometimes exactly what the user wants.
+		this.active?.forkBtn?.removeClass("cc-hidden");
 		this.active = null;
 	}
 
@@ -317,7 +348,8 @@ export class TranscriptView {
 
 	renderHistoricalTurns(turns: ChatTurn[]): void {
 		this.clear();
-		for (const turn of turns) {
+		for (let i = 0; i < turns.length; i++) {
+			const turn = turns[i]!;
 			if (turn.role === "user") {
 				this.appendUserTurn(turn);
 				continue;
@@ -345,6 +377,7 @@ export class TranscriptView {
 						this.toolCards.set(block.toolUseId, card);
 					}
 				}
+				turnEl.appendChild(this.makeForkButton(i));
 				continue;
 			}
 			this.appendSystemNotice(

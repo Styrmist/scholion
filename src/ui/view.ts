@@ -11,6 +11,11 @@ import {
 	markCapBypassed,
 	markWarnDelivered,
 } from "../session/costGuard";
+import {
+	buildForkedTurns,
+	freshForkMeta,
+	serializeInheritedTurns,
+} from "../session/forking";
 import { hashString } from "../utils/fs";
 import type { SessionRecord } from "../session/store";
 import { ToolIndex } from "../session/toolIndex";
@@ -72,6 +77,7 @@ export class ChatView extends ItemView {
 			onPermissionRequested: (toolUseId, decision) => {
 				void this.coordinator.decidePermission(toolUseId, decision);
 			},
+			onForkFromTurn: (turnIndex) => { void this.forkFromTurn(turnIndex); },
 		});
 		this.transcript.bindRecordRef(() => this.currentRecord);
 
@@ -233,7 +239,17 @@ export class ChatView extends ItemView {
 		const willAttach = context !== null && shouldAttach(context, previousHash);
 		const finalContext = willAttach ? context : null;
 		const mentions = await this.materializeMentions(text, finalContext?.path ?? null);
-		const prompt = buildPrompt({ userText: text, context: finalContext, mentions });
+		// Forked sessions include their inherited transcript on the first new
+		// turn only — once the CLI hands us a session id we stop re-sending it.
+		const inheritedConversation = this.shouldIncludeInheritedConversation(record)
+			? serializeInheritedTurns(record.turns.slice(0, record.forkedFromTurns ?? 0))
+			: undefined;
+		const prompt = buildPrompt({
+			userText: text,
+			context: finalContext,
+			mentions,
+			inheritedConversation,
+		});
 
 		const userTurn: ChatTurn = {
 			role: "user",
@@ -408,6 +424,68 @@ export class ChatView extends ItemView {
 		return out;
 	}
 
+	/**
+	 * True when the next prompt for this record should carry its inherited
+	 * conversation. The marker is a fork that has not yet completed a turn —
+	 * the CLI session id arrives in `system_init`, meaning Claude has
+	 * absorbed the inherited block, so we don't resend on subsequent turns.
+	 */
+	private shouldIncludeInheritedConversation(record: SessionRecord): boolean {
+		if (record.forkedFromTurns === undefined) return false;
+		if (record.forkedFromTurns <= 0) return false;
+		// First turn in the fork: meta.id is still undefined (CLI hasn't
+		// introduced itself yet).
+		return !record.meta.id;
+	}
+
+	private async forkFromTurn(turnIndex: number): Promise<void> {
+		const parent = this.currentRecord;
+		if (!parent) return;
+		if (this.coordinator.isBusy() || this.coordinator.isAwaitingPermission()) {
+			new Notice("Finish or stop the current turn before forking.");
+			return;
+		}
+		const turn = parent.turns[turnIndex];
+		if (!turn) return;
+		// Only allow forking off assistant turns for now — branching from a
+		// user turn is meaningful too but its UX (drop-vs-keep that turn) is
+		// a separate decision, parked for future work.
+		if (turn.role !== "assistant") return;
+
+		const { turns, forkedFromTurns } = buildForkedTurns({
+			parentTurns: parent.turns,
+			keepThroughIndex: turnIndex,
+		});
+		const meta = freshForkMeta(
+			parent.meta,
+			this.plugin.sessions.createMeta(parent.meta.cwd).localId,
+			Date.now(),
+		);
+		const fork: SessionRecord = {
+			meta,
+			turns,
+			permissions: {
+				allowedTools: [...parent.permissions.allowedTools],
+				deniedTools: [...parent.permissions.deniedTools],
+			},
+			forkedFromTurns,
+		};
+		await this.plugin.sessions.saveImmediate(fork);
+		await this.swapToRecord(fork);
+		new Notice(`Forked ${forkedFromTurns} turn${forkedFromTurns === 1 ? "" : "s"} into a new chat.`);
+	}
+
+	private async swapToRecord(record: SessionRecord): Promise<void> {
+		this.currentRecord = record;
+		this.coordinator.bindRecord(record);
+		this.transcript.renderHistoricalTurns(record.turns);
+		this.diagnosticsPanel.setEntries(record.diagnostics);
+		this.statusPill.setUsage(record.usage ?? null);
+		this.picker.setActive(record.meta);
+		this.composer.focus();
+		await this.refreshContext();
+	}
+
 	private resolveMentionFile(name: string): TFile | null {
 		// Wikilink-style resolution first; falls back to a literal path lookup
 		// for users who insert paths directly (e.g. by pasting).
@@ -457,6 +535,16 @@ export class ChatView extends ItemView {
 		this.transcript.finalizeTurn();
 		if (outcome.kind === "completed" || outcome.kind === "aborted" || outcome.kind === "denied_inline" || outcome.kind === "error") {
 			void this.refreshContext();
+		}
+		// First completed turn after a fork: the CLI now owns the inherited
+		// context, so the marker can drop. Clearing on any non-stale outcome
+		// (including aborts) is fine because future turns will check `meta.id`
+		// — if the CLI session id never landed, the inherited block will go
+		// out again next send.
+		const record = this.currentRecord;
+		if (record && record.forkedFromTurns !== undefined && record.meta.id) {
+			delete record.forkedFromTurns;
+			this.plugin.sessions.scheduleSave(record);
 		}
 	}
 }

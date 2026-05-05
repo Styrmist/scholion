@@ -140,6 +140,29 @@
 	opacity: 0.7;
 }
 
+.cc-turn--assistant {
+	position: relative;
+}
+
+.cc-turn__fork-btn {
+	display: inline-block;
+	margin-top: 6px;
+	padding: 2px 8px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	background: transparent;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	cursor: pointer;
+	user-select: none;
+	width: fit-content;
+}
+
+.cc-turn__fork-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
 .cc-turn__text {
 	font-size: var(--font-text-size);
 	line-height: 1.5;
