@@ -7,6 +7,7 @@ export interface SessionPickerCallbacks {
 	onSelect: (localId: string) => void;
 	onRename: (localId: string, title: string) => void;
 	onDelete: (localId: string) => void;
+	onExport: (localId: string) => void;
 }
 
 const NEW_CHAT_ITEM: SessionMeta = {
@@ -72,6 +73,9 @@ export class SessionPicker {
 				item.setTitle("Rename current…").setIcon("pencil").onClick(() => this.promptRename());
 			});
 			menu.addItem((item) => {
+				item.setTitle("Export current to note…").setIcon("file-down").onClick(() => this.triggerExport());
+			});
+			menu.addItem((item) => {
 				item.setTitle("Delete current…").setIcon("trash").onClick(() => this.promptDelete());
 			});
 		}
@@ -88,6 +92,11 @@ export class SessionPicker {
 		void prompt(this.app, "Rename chat", current).then((next) => {
 			if (next && next.trim()) this.callbacks.onRename(localId, next.trim());
 		});
+	}
+
+	private triggerExport(): void {
+		if (!this.activeLocalId) return;
+		this.callbacks.onExport(this.activeLocalId);
 	}
 
 	private promptDelete(): void {

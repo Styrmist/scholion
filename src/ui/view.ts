@@ -1,4 +1,4 @@
-import { ItemView, Notice, TFile, WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { resolvePaths } from "../binary/paths";
 import { MentionCandidate, parseMentions } from "../composer/mentions";
 import { captureActiveContext, CapturedContext, isMarkdownLike, truncate } from "../context/activeNote";
@@ -18,6 +18,11 @@ import {
 	markWarnDelivered,
 } from "../session/costGuard";
 import {
+	defaultExportFilename,
+	formatTranscriptAsMarkdown,
+	normalizeExportPath,
+} from "../session/exportMarkdown";
+import {
 	buildForkedTurns,
 	freshForkMeta,
 	serializeInheritedTurns,
@@ -31,7 +36,7 @@ import { TurnState } from "../session/turnState";
 import { ChatTurn } from "../types";
 import type ClaudeCodePlugin from "../main";
 import { Composer } from "./composer";
-import { confirm } from "./confirmModal";
+import { confirm, prompt } from "./confirmModal";
 import { DiagnosticsPanel } from "./diagnosticsPanel";
 import { SessionPicker } from "./sessionPicker";
 import { StatusPill } from "./statusPill";
@@ -85,6 +90,7 @@ export class ChatView extends ItemView {
 				void this.plugin.sessions.rename(localId, title).then(() => this.refreshPicker());
 			},
 			onDelete: (localId) => { void this.handleDelete(localId); },
+			onExport: (localId) => { void this.handleExport(localId); },
 		});
 		this.statusPill = new StatusPill(header);
 
@@ -221,6 +227,62 @@ export class ChatView extends ItemView {
 			await this.startNewChat();
 		} else {
 			this.refreshPicker();
+		}
+	}
+
+	private async handleExport(localId: string): Promise<void> {
+		// Always reload from disk: the active record's pending writes may not
+		// have been flushed yet, and exporting a different session needs the
+		// load anyway. SessionStore.flushAll first so what the user sees in
+		// the chat matches what lands in the note.
+		await this.plugin.sessions.flushAll();
+		const record = await this.plugin.sessions.load(localId);
+		if (!record) {
+			new Notice("Could not load that chat.");
+			return;
+		}
+		const initial = defaultExportFilename(record.meta, Date.now());
+		const chosen = await prompt(this.app, "Export chat to note", initial);
+		if (chosen === null) return;
+		const target = normalizeExportPath(chosen);
+		if (!target) {
+			new Notice("Please choose a non-empty path ending in .md");
+			return;
+		}
+		const existing = this.app.vault.getAbstractFileByPath(target);
+		if (existing instanceof TFile) {
+			const ok = await confirm(this.app, `${target} already exists. Overwrite?`);
+			if (!ok) return;
+		} else if (existing) {
+			new Notice(`${target} is a folder, not a file. Pick a different path.`);
+			return;
+		}
+		const folder = target.includes("/") ? target.slice(0, target.lastIndexOf("/")) : "";
+		if (folder) {
+			const folderFile = this.app.vault.getAbstractFileByPath(folder);
+			if (!folderFile) {
+				try { await this.app.vault.createFolder(folder); } catch (e) {
+					new Notice(`Could not create folder ${folder}: ${(e as Error).message}`);
+					return;
+				}
+			} else if (!(folderFile instanceof TFolder)) {
+				new Notice(`${folder} is not a folder.`);
+				return;
+			}
+		}
+		const body = formatTranscriptAsMarkdown(record);
+		try {
+			let file: TFile;
+			if (existing instanceof TFile) {
+				await this.app.vault.modify(existing, body);
+				file = existing;
+			} else {
+				file = await this.app.vault.create(target, body);
+			}
+			new Notice(`Exported to ${file.path}`);
+			await this.app.workspace.getLeaf(true).openFile(file);
+		} catch (e) {
+			new Notice(`Export failed: ${(e as Error).message}`);
 		}
 	}
 
