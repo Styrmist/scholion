@@ -75,18 +75,42 @@ export function normalizeExportPath(raw: string): string {
 }
 
 /**
- * Strip path separators and characters Obsidian/Windows reject in filenames,
- * collapse whitespace, and trim to a sensible length. Empty results fall
- * back to "Chat" so the caller never has to special-case zero-length input.
+ * Build a clean filename slug from a session title. Titles come straight from
+ * the first user message (see `makeTitle` in the chat view), so they often
+ * contain pasted URLs and Markdown link syntax that produce ugly defaults
+ * like `https www.example.com [foo](https www.example.com) ...`. We
+ *
+ *   1. reduce `[text](url)` → `text` so labelled links contribute their label
+ *   2. strip `http[s]://...` URLs entirely
+ *   3. strip bare `http`/`https` tokens that survive a mid-URL truncation
+ *      (e.g. a title cut at "https ww…")
+ *   4. replace path separators and OS-forbidden chars with spaces
+ *   5. collapse whitespace and trim leading/trailing punctuation noise
+ *
+ * Empty results fall back to "Chat" so the caller never special-cases zero
+ * length. The output is then capped at 80 chars to keep the eventual file
+ * name within typical filesystem limits.
  */
 export function slugifyForFilename(s: string): string {
-	const cleaned = s
-		.replace(/[/\\:*?"<>|#^[\]]/g, " ")
-		.replace(/\s+/g, " ")
-		.trim();
+	let cleaned = s.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+	cleaned = cleaned.replace(/https?:\/\/\S+/gi, " ");
+	cleaned = cleaned.replace(/\bhttps?\b/gi, " ");
+	cleaned = cleaned.replace(/[/\\:*?"<>|#^[\]]/g, " ");
+	cleaned = cleaned.replace(/\s+/g, " ").trim();
+	cleaned = trimPunctNoise(cleaned);
 	if (!cleaned) return "Chat";
 	const max = 80;
-	return cleaned.length > max ? cleaned.slice(0, max).trimEnd() : cleaned;
+	const capped = cleaned.length > max ? cleaned.slice(0, max).trimEnd() : cleaned;
+	return trimPunctNoise(capped) || "Chat";
+}
+
+/**
+ * Strip leading/trailing characters that are valid in filenames but make for
+ * an ugly stem after URL/link removal — parens, dots, quotes, dashes, the
+ * ellipsis Claude uses to mark truncation, etc.
+ */
+function trimPunctNoise(s: string): string {
+	return s.replace(/^[\s.,;:!?…()\-—–"'`]+|[\s.,;:!?…()\-—–"'`]+$/g, "");
 }
 
 function renderHeader(meta: SessionMeta, usage: SessionUsage | undefined): string {

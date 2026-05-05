@@ -203,6 +203,41 @@ describe("slugifyForFilename", () => {
 		const long = "a".repeat(120);
 		expect(slugifyForFilename(long).length).toBe(80);
 	});
+
+	it("reduces a Markdown link to its label", () => {
+		expect(slugifyForFilename("read [SwiftUI tutorial](https://example.com/100)")).toBe("read SwiftUI tutorial");
+	});
+
+	it("strips bare URLs entirely", () => {
+		expect(slugifyForFilename("Look at https://www.example.com/path now")).toBe("Look at now");
+	});
+
+	it("strips lingering bare 'http'/'https' tokens left after truncation", () => {
+		expect(slugifyForFilename("foo https ww... bar")).toBe("foo ww... bar");
+	});
+
+	it("trims trailing punctuation/quote/paren/ellipsis noise", () => {
+		expect(slugifyForFilename("Important note ...")).toBe("Important note");
+		expect(slugifyForFilename("(Question?)")).toBe("Question");
+		expect(slugifyForFilename("--- title ---")).toBe("title");
+	});
+
+	it("real-world: pasted URL + truncated tail produces a clean stem", () => {
+		const messy = "https://www.hackingwithswift.com [www.hackingwithswift.com](https://www.hackingwithswift.com) 100 swiftui (https ww…";
+		const got = slugifyForFilename(messy);
+		expect(got).not.toContain("https");
+		expect(got).not.toContain("[");
+		expect(got).not.toContain("]");
+		expect(got).not.toContain(":");
+		expect(got).not.toContain("…");
+		expect(got).toContain("100 swiftui");
+	});
+
+	it("falls back to 'Chat' if cleaning eats everything", () => {
+		expect(slugifyForFilename("https://example.com")).toBe("Chat");
+		expect(slugifyForFilename("[](http://x)")).toBe("Chat");
+		expect(slugifyForFilename("...??...")).toBe("Chat");
+	});
 });
 
 describe("defaultExportFilename", () => {
