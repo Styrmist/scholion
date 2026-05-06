@@ -102,6 +102,14 @@ export interface SendTurnRequest {
 	content: string | RichContent[];
 	attachments?: Attachment[];
 	options?: TurnOptions;
+	signal?: AbortSignal;
+	/**
+	 * Optional per-turn diagnostic sink. Backends may emit DiagnosticEvent
+	 * during a turn (CLI stderr, API retries, transport hiccups). Spec models
+	 * Backend.diagnostics() as an AsyncIterable for cross-turn streaming; this
+	 * callback is the v1 hot-path equivalent — see TODO.md.
+	 */
+	onDiagnostic?: (event: DiagnosticEvent) => void;
 }
 
 export interface SessionRef {

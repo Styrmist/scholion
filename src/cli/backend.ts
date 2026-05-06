@@ -265,6 +265,9 @@ export class ClaudeCodeBackend implements ClaudeFullSurface {
 			if (!ctx.nativeId && record.meta.id) {
 				this.sessionMap.upsert(req.sessionId, { nativeId: record.meta.id });
 			}
+			const sessionRecord = record;
+			const onDiagnostic = req.onDiagnostic;
+			const signal = req.signal;
 			const paths = resolvePaths(this.plugin);
 			const permMode: PermissionMode =
 				req.options?.model && req.options?.model.includes("plan")
@@ -283,6 +286,10 @@ export class ClaudeCodeBackend implements ClaudeFullSurface {
 							.map((c) => (c as { type: "text"; text: string }).text)
 							.join("\n");
 			const controller = new AbortController();
+			if (signal) {
+				if (signal.aborted) controller.abort();
+				else signal.addEventListener("abort", () => controller.abort(), { once: true });
+			}
 			void this.deps.runner
 				.send({
 					prompt: promptText,
@@ -310,11 +317,17 @@ export class ClaudeCodeBackend implements ClaudeFullSurface {
 							this.sessionMap.upsert(req.sessionId, {
 								nativeId: out.nativeSessionId,
 							});
+							// Double-write: until UI fully migrates off
+							// SessionMeta.id (Stage 7), keep it in sync so legacy
+							// !record.meta.id checks still resolve correctly.
+							if (!sessionRecord.meta.id) {
+								sessionRecord.meta.id = out.nativeSessionId;
+							}
 						}
 						for (const ev of out.events) queue.push(ev);
-						// Diagnostics flow through a separate channel; in v1 we drop
-						// them here because the existing TurnCoordinator still receives
-						// them via the legacy onEvent path (Stage 5 wires them up).
+						if (onDiagnostic) {
+							for (const d of out.diagnostics) onDiagnostic(d);
+						}
 					},
 				})
 				.then(() => queue.close())
