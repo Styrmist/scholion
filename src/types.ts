@@ -160,7 +160,11 @@ export type PermissionMode = "default" | "acceptEdits" | "plan";
 
 export type SendMethod = "enter" | "cmdEnter";
 
-export type PermissionDecision = "once" | "session" | "global" | "deny";
+export type PermissionDecision =
+	| "allowOnce"
+	| "allowSession"
+	| "allowAlways"
+	| "deny";
 
 export interface PendingPermission {
 	toolUseId: string;

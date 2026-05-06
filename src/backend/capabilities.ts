@@ -21,6 +21,9 @@ export interface McpServerInfo {
 	env?: Record<string, string>;
 	transport: "stdio" | "http" | "sse";
 	url?: string;
+	/** Concise one-line summary suitable for UI display (e.g. command line or URL). */
+	summary?: string;
+	disabled?: boolean;
 }
 
 export interface McpServerSpec {

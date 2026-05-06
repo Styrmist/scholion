@@ -436,7 +436,7 @@ export class TurnCoordinator {
 		}
 
 		record.permissions = applyDecision(record.permissions, tool, decision);
-		if (decision === "global") {
+		if (decision === "allowAlways") {
 			const settings = this.plugin.settings;
 			if (!settings.allowedTools.includes(tool)) settings.allowedTools.push(tool);
 			settings.disallowedTools = settings.disallowedTools.filter((t) => t !== tool);

@@ -1,9 +1,11 @@
 import { promises as fsp } from "fs";
 import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
 import { join } from "path";
+import { BackendRegistry } from "./backend/registry";
 import { BinaryInstaller } from "./binary/installer";
 import { resolvePaths } from "./binary/paths";
 import { AuthManager } from "./cli/auth";
+import { ClaudeCodeBackend } from "./cli/backend";
 import { ClaudeRunner } from "./cli/runner";
 import { RIBBON_ICON, VIEW_TYPE_CHAT } from "./constants";
 import { installHookScript } from "./permissions/hookInstaller";
@@ -23,6 +25,8 @@ export default class ClaudeCodePlugin extends Plugin {
 	sessions!: SessionStore;
 	auth!: AuthManager;
 	hookServer!: HookServer;
+	registry!: BackendRegistry;
+	backend!: ClaudeCodeBackend;
 
 	override async onload(): Promise<void> {
 		await this.loadSettings();
@@ -32,6 +36,19 @@ export default class ClaudeCodePlugin extends Plugin {
 		this.sessions = new SessionStore(this);
 		this.auth = new AuthManager(this);
 		this.hookServer = new HookServer(this);
+		this.backend = new ClaudeCodeBackend(this, {
+			runner: this.runner,
+			auth: this.auth,
+			hookServer: this.hookServer,
+			installer: this.installer,
+			sessions: this.sessions,
+		});
+		this.registry = new BackendRegistry();
+		this.registry.register(this.backend);
+		if (this.settings.defaultBackendId !== this.backend.id()) {
+			// Persisted default points at a backend that didn't register; fall back.
+			this.settings.defaultBackendId = this.backend.id();
+		}
 
 		this.ensurePluginDirs();
 		this.migrateLegacyTmpDir();

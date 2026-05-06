@@ -51,10 +51,26 @@ import type { PermissionMode, StreamEvent } from "../types";
 import type { HookDecision } from "../permissions/hookProtocol";
 
 const CLAUDE_MODELS: ModelInfo[] = [
-	{ id: "sonnet", displayName: "sonnet" },
-	{ id: "opus", displayName: "opus" },
-	{ id: "haiku", displayName: "haiku" },
-	{ id: "opusplan", displayName: "opusplan" },
+	{
+		id: "sonnet",
+		displayName: "sonnet",
+		description: "Latest Sonnet, everyday notes and writing",
+	},
+	{
+		id: "opus",
+		displayName: "opus",
+		description: "Latest Opus, complex reasoning",
+	},
+	{
+		id: "haiku",
+		displayName: "haiku",
+		description: "Fast / efficient, simple tasks",
+	},
+	{
+		id: "opusplan",
+		displayName: "opusplan",
+		description: "Opus while planning, Sonnet while executing",
+	},
 ];
 
 const CLAUDE_TOOLS: ToolInfo[] = [
@@ -428,6 +444,8 @@ export class ClaudeCodeBackend implements ClaudeFullSurface {
 					s.transport === "stdio" || s.transport === "http" || s.transport === "sse"
 						? s.transport
 						: "stdio",
+				summary: s.summary,
+				disabled: s.disabled,
 			});
 		}
 		return out;

@@ -1,5 +1,10 @@
 import type { BackendId, SessionId, TurnId, PermReqId } from "./ids";
-import type { SessionMeta, PermissionGrants, AttachmentRef } from "../types";
+import type {
+	SessionMeta,
+	PermissionGrants,
+	AttachmentRef,
+	PermissionDecision,
+} from "../types";
 import type { SessionRecord } from "../session/store";
 
 export type StopReason =
@@ -11,7 +16,7 @@ export type StopReason =
 	| "cancelled"
 	| "error";
 
-export type PermissionDecision = "allowOnce" | "allowSession" | "allowAlways" | "deny";
+export type { PermissionDecision } from "../types";
 
 export interface PermissionRule {
 	tool: string;
@@ -39,6 +44,7 @@ export interface Capabilities {
 export interface ModelInfo {
 	id: string;
 	displayName: string;
+	description?: string;
 	contextTokens?: number;
 	costUsdPerMTokIn?: number;
 	costUsdPerMTokOut?: number;
@@ -109,6 +115,7 @@ export type NormalizedErrorCode =
 	| "rate_limited"
 	| "aborted"
 	| "binary_missing"
+	| "permission_denied"
 	| "transport"
 	| "unknown";
 
