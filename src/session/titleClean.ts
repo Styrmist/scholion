@@ -7,6 +7,7 @@
 
 const TRIM_NOISE_CLASS = /^[\s.,;:!?…()\-—–"'`]+|[\s.,;:!?…()\-—–"'`]+$/g;
 
+
 /**
  * Reduce common noise patterns:
  *  - `[label](url)` Markdown links collapse to `label`
@@ -41,23 +42,3 @@ export function heuristicTitle(userText: string): string {
 	return stripped.slice(0, 57).trimEnd() + "…";
 }
 
-/**
- * Clean a title produced by Haiku before storing it. Strips paired wrap
- * quotes the model sometimes adds, removes trailing punctuation, collapses
- * whitespace, caps at 60 chars. Returns the empty string when cleaning
- * leaves nothing — the caller should treat that as a generation failure
- * and fall back to the heuristic.
- */
-export function cleanGeneratedTitle(raw: string): string {
-	let s = raw.replace(/\s+/g, " ").trim();
-	// Strip paired wrap quotes (straight + curly variants Claude sometimes uses).
-	const wrapPair = /^(["'`“”‘’«»])(.+)\1$/;
-	const m = s.match(wrapPair);
-	if (m) s = m[2]!;
-	// Common case where Claude opens with “ and closes with ” (mismatched but paired in Unicode).
-	s = s.replace(/^[“](.+)[”]$/, "$1").replace(/^[‘](.+)[’]$/, "$1");
-	s = trimPunctNoise(s);
-	if (!s) return "";
-	if (s.length > 60) s = s.slice(0, 57).trimEnd() + "…";
-	return s;
-}

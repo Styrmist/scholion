@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanGeneratedTitle, heuristicTitle, stripNoise, trimPunctNoise } from "./titleClean";
+import { heuristicTitle, stripNoise, trimPunctNoise } from "./titleClean";
 
 describe("stripNoise", () => {
 	it("collapses [label](url) to label", () => {
@@ -76,40 +76,3 @@ describe("heuristicTitle", () => {
 	});
 });
 
-describe("cleanGeneratedTitle", () => {
-	it("returns the title when it's already clean", () => {
-		expect(cleanGeneratedTitle("Installing Rust on macOS")).toBe("Installing Rust on macOS");
-	});
-
-	it("strips paired straight quotes", () => {
-		expect(cleanGeneratedTitle('"Installing Rust"')).toBe("Installing Rust");
-		expect(cleanGeneratedTitle("'Installing Rust'")).toBe("Installing Rust");
-	});
-
-	it("strips paired curly quotes (smart quotes Claude sometimes uses)", () => {
-		expect(cleanGeneratedTitle("“Installing Rust”")).toBe("Installing Rust");
-		expect(cleanGeneratedTitle("‘Installing Rust’")).toBe("Installing Rust");
-	});
-
-	it("strips a trailing period or ellipsis", () => {
-		expect(cleanGeneratedTitle("Installing Rust.")).toBe("Installing Rust");
-		expect(cleanGeneratedTitle("Installing Rust…")).toBe("Installing Rust");
-	});
-
-	it("collapses whitespace runs and trims", () => {
-		expect(cleanGeneratedTitle("  Installing   Rust   ")).toBe("Installing Rust");
-	});
-
-	it("returns empty when cleaning leaves nothing usable", () => {
-		expect(cleanGeneratedTitle("")).toBe("");
-		expect(cleanGeneratedTitle("...")).toBe("");
-		expect(cleanGeneratedTitle('""')).toBe("");
-	});
-
-	it("caps at 60 chars with ellipsis", () => {
-		const long = "x".repeat(70);
-		const got = cleanGeneratedTitle(long);
-		expect(got.length).toBe(58);
-		expect(got.endsWith("…")).toBe(true);
-	});
-});

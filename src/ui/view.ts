@@ -1,6 +1,5 @@
 import { ItemView, Notice, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { resolvePaths } from "../binary/paths";
-import { runTitleSubprocess } from "../cli/titleRunner";
 import { MentionCandidate, parseMentions } from "../composer/mentions";
 import { captureActiveContext, CapturedContext, isMarkdownLike, truncate } from "../context/activeNote";
 import { buildPrompt, shouldAttach } from "../context/promptBuilder";
@@ -28,8 +27,7 @@ import {
 	freshForkMeta,
 	serializeInheritedTurns,
 } from "../session/forking";
-import { cleanGeneratedTitle, heuristicTitle } from "../session/titleClean";
-import { buildTitlePrompt, extractFirstExchange, parseTitleResponse } from "../session/titleSuggest";
+import { heuristicTitle } from "../session/titleClean";
 import { formatTokens } from "../utils/format";
 import { hashString } from "../utils/fs";
 import type { SessionRecord } from "../session/store";
@@ -38,7 +36,6 @@ import { CoordinatorEvents, TurnCoordinator, TurnOutcome } from "../session/turn
 import { TurnState } from "../session/turnState";
 import { ChatTurn } from "../types";
 import type ClaudeCodePlugin from "../main";
-import * as logger from "../utils/log";
 import { Composer } from "./composer";
 import { confirm, prompt } from "./confirmModal";
 import { DiagnosticsPanel } from "./diagnosticsPanel";
@@ -678,69 +675,6 @@ export class ChatView extends ItemView {
 		if (record && record.forkedFromTurns !== undefined && record.meta.id) {
 			delete record.forkedFromTurns;
 			this.plugin.sessions.scheduleSave(record);
-		}
-		// Auto-title: fire after the very first assistant turn completes,
-		// once per session. Async/non-blocking — picker label updates when
-		// Haiku replies. Manual rename always wins (titler captures the
-		// title at spawn and only writes if it's still the heuristic).
-		if (
-			outcome.kind === "completed" &&
-			record &&
-			!record.meta.titleAutoSuggested &&
-			record.turns.length >= 2 &&
-			record.turns[0]!.role === "user" &&
-			record.turns[1]!.role === "assistant"
-		) {
-			void this.suggestTitleAsync(record);
-		}
-	}
-
-	/**
-	 * Fire-and-forget call to the Haiku titler. Sets the one-shot
-	 * `titleAutoSuggested` flag immediately so a parallel turn-finished
-	 * event can't double-fire. On success, replaces the heuristic title.
-	 * On failure (offline, auth broken, timeout, garbage output), leaves
-	 * the heuristic title in place — that's already URL/markdown-cleaned.
-	 */
-	private async suggestTitleAsync(record: SessionRecord): Promise<void> {
-		record.meta.titleAutoSuggested = true;
-		this.plugin.sessions.scheduleSave(record);
-
-		const exchange = extractFirstExchange(record);
-		if (!exchange) return;
-		const titleAtSpawn = record.meta.title;
-		const prompt = buildTitlePrompt({
-			firstUserText: exchange.user,
-			firstAssistantText: exchange.assistant,
-		});
-
-		let suggested = "";
-		try {
-			const result = await runTitleSubprocess(this.plugin, prompt);
-			if (result.timedOut) {
-				logger.warn("title subprocess timed out");
-			} else if (result.exitCode !== 0) {
-				logger.warn("title subprocess non-zero exit", { exitCode: result.exitCode, stderr: result.stderr.slice(0, 500) });
-			} else {
-				const parsed = parseTitleResponse(result.stdout);
-				if (parsed.ok) {
-					suggested = cleanGeneratedTitle(parsed.title);
-				} else {
-					logger.warn("title parse failed", parsed.reason);
-				}
-			}
-		} catch (e) {
-			logger.warn("title spawn error", e);
-		}
-
-		if (!suggested) return;
-		// Honor any rename that happened while the titler ran.
-		if (record.meta.title !== titleAtSpawn) return;
-		record.meta.title = suggested;
-		record.meta.updatedAt = Date.now();
-		await this.plugin.sessions.saveImmediate(record);
-		if (this.currentRecord === record) {
-			this.refreshPicker();
 		}
 	}
 }
