@@ -1,9 +1,9 @@
 {
-	"id": "claude-code",
-	"name": "Claude Code",
-	"version": "0.13.0",
-	"minAppVersion": "1.5.0",
-	"description": "Run Claude Code in Obsidian's sidebar. Subscription auth supported via the genuine Claude Code CLI. Desktop only.",
-	"author": "obsidian-claude-code",
-	"isDesktopOnly": true
+  "id": "scholion",
+  "name": "Scholion",
+  "version": "0.13.0",
+  "minAppVersion": "1.5.0",
+  "description": "Run Claude Code in Obsidian's sidebar. Subscription auth supported via the genuine Claude Code CLI. Desktop only.",
+  "author": "Styrmist",
+  "isDesktopOnly": true
 }

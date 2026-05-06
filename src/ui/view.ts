@@ -87,7 +87,7 @@ export class ChatView extends ItemView {
 	}
 
 	getViewType(): string { return VIEW_TYPE_CHAT; }
-	getDisplayText(): string { return "Claude Code"; }
+	getDisplayText(): string { return "Scholion"; }
 	getIcon(): string { return RIBBON_ICON; }
 
 	async onOpen(): Promise<void> {

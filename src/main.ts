@@ -62,7 +62,7 @@ export default class ClaudeCodePlugin extends Plugin {
 
 		this.registerView(VIEW_TYPE_CHAT, (leaf) => new ChatView(leaf, this));
 
-		this.addRibbonIcon(RIBBON_ICON, "Claude Code", () => { void this.activateView(); });
+		this.addRibbonIcon(RIBBON_ICON, "Scholion", () => { void this.activateView(); });
 
 		this.addCommand({
 			id: "open",
@@ -113,7 +113,7 @@ export default class ClaudeCodePlugin extends Plugin {
 		if (!leaf) {
 			leaf = workspace.getRightLeaf(false);
 			if (!leaf) {
-				new Notice("Could not open Claude Code sidebar.");
+				new Notice("Could not open Scholion sidebar.");
 				return;
 			}
 			await leaf.setViewState({ type: VIEW_TYPE_CHAT, active: true });
@@ -144,7 +144,7 @@ export default class ClaudeCodePlugin extends Plugin {
 			ensureDir(paths.sessionsDir);
 			ensureDir(paths.tmpDir);
 		} catch (e) {
-			console.error("[claude-code] could not create plugin dirs", e);
+			console.error("[scholion] could not create plugin dirs", e);
 		}
 	}
 

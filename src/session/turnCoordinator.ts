@@ -686,9 +686,9 @@ export class TurnCoordinator {
 			}
 			const error = e instanceof Error ? e : new Error(String(e));
 			if (error instanceof BinaryNotInstalledError) {
-				new Notice("Install Claude Code from the plugin settings to start chatting.");
+				new Notice("Install the Claude binary from Scholion's settings to start chatting.");
 			} else {
-				new Notice(`Claude Code error: ${error.message}`);
+				new Notice(`Scholion error: ${error.message}`);
 			}
 			this.transitionTo({ kind: "error", lease, message: error.message });
 			this.events.onTurnFinished({ kind: "error", error });

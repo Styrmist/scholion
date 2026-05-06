@@ -1,4 +1,4 @@
-# Claude Code for Obsidian
+# Scholion
 
 Run [Claude Code](https://claude.com/claude-code) in an Obsidian sidebar. Chat with Claude, let it read and edit notes via the standard tool set, and keep one persistent session per chat — all using your existing Claude.ai subscription (or any auth the bundled Claude Code CLI accepts).
 
@@ -35,16 +35,16 @@ Treats the bundled CLI as an untrusted child process. Specifically:
 
 > Not yet listed in the Obsidian Community Plugins catalog. Install manually for now.
 
-1. Download `claude-code-<version>.zip` from the [latest GitHub release](https://github.com/Styrmist/obsidian-claude-code/releases/latest), or build it yourself (see Development below).
-2. Extract it directly into `<your-vault>/.obsidian/plugins/`. The archive contains a top-level `claude-code/` folder, so you'll end up with `<your-vault>/.obsidian/plugins/claude-code/{main.js,manifest.json,styles.css}`.
-3. In Obsidian: **Settings → Community plugins** → enable **Claude Code**.
-4. Open the new ribbon icon (or the command palette → "Claude Code") to reveal the chat view.
-5. **Settings → Claude Code → Binary → Install latest** to download the bundled CLI.
-6. **Settings → Claude Code → Account → Sign in** to authenticate via the standard browser-OAuth flow.
+1. Download `scholion-<version>.zip` from the [latest GitHub release](https://github.com/Styrmist/obsidian-claude-code/releases/latest), or build it yourself (see Development below).
+2. Extract it directly into `<your-vault>/.obsidian/plugins/`. The archive contains a top-level `scholion/` folder, so you'll end up with `<your-vault>/.obsidian/plugins/scholion/{main.js,manifest.json,styles.css}`.
+3. In Obsidian: **Settings → Community plugins** → enable **Scholion**.
+4. Open the new ribbon icon (or the command palette → "Scholion") to reveal the chat view.
+5. **Settings → Scholion → Binary → Install latest** to download the bundled CLI.
+6. **Settings → Scholion → Account → Sign in** to authenticate via the standard browser-OAuth flow.
 
 ## Configuration
 
-All settings live under **Settings → Claude Code**. Highlights:
+All settings live under **Settings → Scholion**. Highlights:
 
 - **Permissions → Always-allowed tools / Always-denied tools** — pre-grant or block specific tools globally. Read/Grep/Glob are allowed by default; Edit/Write/Bash require explicit grant or per-session approval.
 - **Model & prompt → Model** — pick from the dropdown, or **Custom…** for a full model name (`claude-opus-4-7`), an inference profile ARN (Bedrock), or a deployment name (Foundry).
@@ -55,7 +55,7 @@ All settings live under **Settings → Claude Code**. Highlights:
 
 ## Sessions and persistence
 
-- One session per chat. Sessions are saved as JSON under `<vault>/.obsidian/plugins/claude-code/sessions/<localId>.json`.
+- One session per chat. Sessions are saved as JSON under `<vault>/.obsidian/plugins/scholion/sessions/<localId>.json`.
 - Empty new chats are not persisted — switching away discards them. The session is registered in the picker on the first user message.
 - Per-session permissions, diagnostics, and running usage totals all persist across reloads.
 - Reload-mid-turn is safe: the spawned `claude` child receives `SIGINT`, then `SIGKILL` after a grace period; no zombies.
@@ -74,10 +74,10 @@ npm run lint       # eslint
 For local development, symlink the repo into your vault's plugins directory:
 
 ```bash
-ln -s "$PWD" "<vault>/.obsidian/plugins/obsidian-claude-code"
+ln -s "$PWD" "<vault>/.obsidian/plugins/scholion"
 ```
 
-Obsidian loads the plugin via `manifest.id` (`claude-code`), so the symlink directory name doesn't have to match.
+Obsidian loads the plugin via `manifest.id` (`scholion`), so the symlink directory name doesn't have to match.
 
 The repository follows the conventions in [AGENTS.md](AGENTS.md). Roadmap and known issues live in [TODO.md](TODO.md).
 

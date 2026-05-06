@@ -5,13 +5,13 @@ export function setVerbose(enabled: boolean): void {
 }
 
 export function log(...args: unknown[]): void {
-	if (verboseEnabled) console.debug("[claude-code]", ...args);
+	if (verboseEnabled) console.debug("[scholion]", ...args);
 }
 
 export function warn(...args: unknown[]): void {
-	console.warn("[claude-code]", ...args);
+	console.warn("[scholion]", ...args);
 }
 
 export function error(...args: unknown[]): void {
-	console.error("[claude-code]", ...args);
+	console.error("[scholion]", ...args);
 }

@@ -3,15 +3,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("./binary/paths", () => ({
 	resolvePaths: () => ({
 		vaultRoot: "/vault",
-		configDir: "/vault/.obsidian/plugins/claude-code/config",
-		binaryPath: "/vault/.obsidian/plugins/claude-code/bin/claude",
-		binDir: "/vault/.obsidian/plugins/claude-code/bin",
-		pluginDir: "/vault/.obsidian/plugins/claude-code",
-		sessionsDir: "/vault/.obsidian/plugins/claude-code/sessions",
-		tmpDir: "/tmp/obsidian-claude-code/v1",
-		hookScriptPath: "/vault/.obsidian/plugins/claude-code/hook.sh",
+		configDir: "/vault/.obsidian/plugins/scholion/config",
+		binaryPath: "/vault/.obsidian/plugins/scholion/bin/claude",
+		binDir: "/vault/.obsidian/plugins/scholion/bin",
+		pluginDir: "/vault/.obsidian/plugins/scholion",
+		sessionsDir: "/vault/.obsidian/plugins/scholion/sessions",
+		tmpDir: "/tmp/obsidian-scholion/v1",
+		hookScriptPath: "/vault/.obsidian/plugins/scholion/hook.sh",
 		installedRecordPath:
-			"/vault/.obsidian/plugins/claude-code/installed.json",
+			"/vault/.obsidian/plugins/scholion/installed.json",
 	}),
 }));
 
@@ -45,7 +45,7 @@ const makeFakePlugin = (): FakePlugin => ({
 		disallowedTools: [],
 	},
 	saveSettings: async () => undefined,
-	manifest: { dir: "/vault/.obsidian/plugins/claude-code" },
+	manifest: { dir: "/vault/.obsidian/plugins/scholion" },
 });
 
 const makeRecord = (overrides?: Partial<SessionRecord>): SessionRecord => ({

@@ -1,4 +1,4 @@
-export const VIEW_TYPE_CHAT = "claude-code-chat";
+export const VIEW_TYPE_CHAT = "scholion-chat";
 
 export const PLUGIN_DIR_BIN = "bin";
 export const PLUGIN_DIR_CONFIG = "config";
@@ -83,7 +83,7 @@ export const HOOK_RESP_SUFFIX = ".resp";
 // outside the vault avoids iCloud/cloud-sync interference with the atomic
 // .tmp→.req rename: parallel writes were producing 11/12 ENOENT-on-read on
 // iCloud-synced vaults. See Hook IPC follow-ups in TODO.md.
-export const HOOK_IPC_DIR_PREFIX = "obsidian-claude-code-";
+export const HOOK_IPC_DIR_PREFIX = "obsidian-scholion-";
 
 export const DEFAULT_MAX_ATTACH_KB = 64;
 
