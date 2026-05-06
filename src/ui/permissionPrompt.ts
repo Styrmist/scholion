@@ -39,9 +39,9 @@ export function renderPermissionPrompt(container: HTMLElement, args: PermissionP
 
 	const actions = container.createDiv({ cls: "cc-perm-actions" });
 	const onceLabel = total === 1 ? "Allow once" : "Allow all once";
-	addButton(actions, onceLabel, () => args.onDecide("once"));
-	addButton(actions, "Allow this session", () => args.onDecide("session"));
-	addButton(actions, "Allow always", () => args.onDecide("global"));
+	addButton(actions, onceLabel, () => args.onDecide("allowOnce"));
+	addButton(actions, "Allow this session", () => args.onDecide("allowSession"));
+	addButton(actions, "Allow always", () => args.onDecide("allowAlways"));
 	const denyLabel = total === 1 ? "Deny" : "Deny all";
 	addButton(actions, denyLabel, () => args.onDecide("deny"), "cc-perm__btn--danger");
 }

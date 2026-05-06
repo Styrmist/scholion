@@ -1,7 +1,5 @@
 import { Notice } from "obsidian";
-import { BinaryNotInstalledError } from "../binary/installer";
-import { resolvePaths } from "../binary/paths";
-import { buildSettingsJson } from "../cli/settingsJson";
+import { BinaryNotInstalledError } from "../providers/claude-code/binary/installer";
 import { MAX_DIAGNOSTICS_PER_SESSION } from "../constants";
 import type { CapturedContext } from "../context/activeNote";
 import type ClaudeCodePlugin from "../main";
@@ -9,17 +7,18 @@ import {
 	DiagnosticEntry,
 	PermissionDecision,
 	PermissionMode,
-	SendOptions,
 	StreamEvent,
 	UsageInfo,
 } from "../types";
+import { sessionId as toSessionId } from "../backend/ids";
+import type { NormalizedEvent, DiagnosticEvent } from "../backend/types";
 import * as logger from "../utils/log";
-import { buildHookCommand } from "../permissions/hookCommandString";
 import { projectedContextSize } from "./contextWarn";
 import { applyDecision } from "./permissions";
 import type { SessionRecord } from "./store";
 import { summarizeLastAssistantTurn } from "./summarize";
 import { ToolIndex } from "./toolIndex";
+import { mapOne } from "./transcriptEventAdapter";
 import {
 	partitionQueueByTool,
 	QueuedPermission,
@@ -27,8 +26,6 @@ import {
 	shouldPauseForCycleCap,
 } from "./turnGuards";
 import { canTransition, TurnLease, TurnState } from "./turnState";
-
-const LOST_SESSION_PATTERN = /session.*not\s*found|unknown\s*session|no\s*conversation\s*found/i;
 
 export type TurnOutcome =
 	| { kind: "completed" }
@@ -436,7 +433,7 @@ export class TurnCoordinator {
 		}
 
 		record.permissions = applyDecision(record.permissions, tool, decision);
-		if (decision === "global") {
+		if (decision === "allowAlways") {
 			const settings = this.plugin.settings;
 			if (!settings.allowedTools.includes(tool)) settings.allowedTools.push(tool);
 			settings.disallowedTools = settings.disallowedTools.filter((t) => t !== tool);
@@ -503,75 +500,119 @@ export class TurnCoordinator {
 		const controller = new AbortController();
 		this.abortController = controller;
 
-		let permissionDenialEvent: { tool: string; reason: string } | null = null;
+		let permissionDenialMessage: string | null = null;
 		let lostSession = false;
-		let sawSystemInit = false;
 		let sawAssistantOutput = false;
+		let transitionedToStreaming = false;
+		let lastUsageSnapshot: Extract<NormalizedEvent, { type: "turn.usage" }> | null = null;
+		let stopReason: string | null = null;
+		let failureError: string | null = null;
+		let stderrTail = "";
 
-		const onEvent = (event: StreamEvent) => {
+		const onDiagnostic = (d: DiagnosticEvent) => {
+			if (!this.isLeaseValid(lease) || this.record !== record) return;
+			if (d.source === "stderr") stderrTail += `${d.message}\n`;
+			this.recordDiagnostic(record, {
+				ts: d.ts,
+				kind: d.source === "stderr" ? "stderr" : "api_retry",
+				text: d.message,
+			});
+		};
+
+		const handleEvent = (event: NormalizedEvent) => {
 			if (!this.isLeaseValid(lease) || this.record !== record) return;
 
-			if (event.kind === "assistant_text" || event.kind === "assistant_text_delta" || event.kind === "tool_use") {
-				sawAssistantOutput = true;
-			}
-			if (event.kind === "system_init" && !sawSystemInit) {
-				sawSystemInit = true;
+			// First content / tool / done event: leave "starting" → "streaming".
+			if (
+				!transitionedToStreaming &&
+				(event.type === "assistant.text.delta" ||
+					event.type === "assistant.text.done" ||
+					event.type === "tool.call.requested")
+			) {
+				transitionedToStreaming = true;
 				this.transitionTo({ kind: "streaming", lease, sawAssistantOutput });
-				if (!record.meta.id) {
-					record.meta.id = event.sessionId;
-				}
 			}
-			if (event.kind === "result" && event.permissionDenied) {
-				permissionDenialEvent = event.permissionDenied;
+
+			switch (event.type) {
+				case "assistant.text.delta":
+				case "assistant.text.done":
+					sawAssistantOutput = true;
+					break;
+				case "tool.call.requested":
+					sawAssistantOutput = true;
+					this.toolUseCountThisTurn++;
+					// Claude emits parallel tool_use blocks at once even though the CLI
+					// invokes their hooks sequentially. If we're holding a permission
+					// prompt for an earlier tool, don't override awaiting_permission.
+					if (this.state.kind !== "awaiting_permission") {
+						this.transitionTo({
+							kind: "tool_running",
+							lease,
+							toolName: event.name,
+							sawAssistantOutput,
+						});
+					}
+					break;
+				case "turn.usage":
+					lastUsageSnapshot = event;
+					break;
+				case "turn.completed":
+					stopReason = event.stopReason;
+					break;
+				case "turn.failed":
+					failureError = event.error.message;
+					if (event.error.code === "session_not_found") lostSession = true;
+					if (event.error.code === "permission_denied") {
+						permissionDenialMessage = event.error.message;
+					}
+					break;
 			}
-			if (event.kind === "result") {
-				accumulateUsage(record, event.totalCostUsd, event.usage);
-				this.events.onUsageChanged(record);
-				// Project the next turn's prompt size — see projectedContextSize
-				// for the formula. With prompt caching active, raw input_tokens
-				// is just the post-breakpoint slice and is wildly low; the cache
-				// reads ARE in the model's context.
-				const projected = projectedContextSize(event.usage);
-				if (projected > 0) {
-					this.events.onContextWarn(record, projected);
-				}
-			}
-			if (event.kind === "tool_use") {
-				this.toolUseCountThisTurn++;
-				// Claude emits all parallel tool_use blocks at once, even though
-				// the CLI invokes their hooks sequentially. If we're currently
-				// holding a permission prompt for an earlier tool, the user is
-				// still deciding — don't override `awaiting_permission` with
-				// `tool_running`, or decidePermission will reject the click.
-				if (this.state.kind !== "awaiting_permission") {
-					this.transitionTo({ kind: "tool_running", lease, toolName: event.name, sawAssistantOutput });
-				}
-			}
-			if (event.kind === "stderr") {
-				if (LOST_SESSION_PATTERN.test(event.line)) lostSession = true;
-				this.recordDiagnostic(record, { ts: Date.now(), kind: "stderr", text: event.line });
-			}
-			if (event.kind === "result" && event.errors?.some((e) => LOST_SESSION_PATTERN.test(e))) {
-				lostSession = true;
-			}
-			if (event.kind === "api_retry") {
-				const status = event.errorStatus !== null ? ` (status ${event.errorStatus})` : "";
-				this.recordDiagnostic(record, {
-					ts: Date.now(),
-					kind: "api_retry",
-					text: `Retry ${event.attempt}/${event.maxRetries} in ${event.retryDelayMs}ms${status}`,
-				});
-			}
-			this.events.onStreamEvent(event);
+
+			// Forward to transcript via the legacy adapter.
+			const legacy = mapOne(event);
+			if (legacy) this.events.onStreamEvent(legacy);
 		};
 
 		try {
-			const result = await this.plugin.runner.send(
-				this.composeSendOptions(record, prompt, controller.signal, onEvent, permissionModeOverride),
-			);
+			const stream = this.plugin.backend.sendTurn({
+				sessionId: toSessionId(record.meta.localId),
+				content: prompt,
+				options: {
+					...((permissionModeOverride ?? this.plugin.settings.permissionMode) && {
+						/* permissionMode is read from session map; setPlanMode applies it */
+					}),
+					...(this.plugin.settings.model && { model: this.plugin.settings.model }),
+					...(this.plugin.settings.systemPromptAddendum && {
+						systemPromptAddendum: this.plugin.settings.systemPromptAddendum,
+					}),
+				},
+				signal: controller.signal,
+				onDiagnostic,
+			});
+
+			// Plan-mode override propagates via setPlanMode if the caller asked for it.
+			if (permissionModeOverride) {
+				this.plugin.backend.setPlanMode(
+					toSessionId(record.meta.localId),
+					permissionModeOverride === "plan",
+				);
+			}
+
+			for await (const event of stream) {
+				handleEvent(event);
+			}
+
+			// Commit cumulative-snapshot usage to the session record.
+			if (lastUsageSnapshot) {
+				accumulateUsageFromSnapshot(record, lastUsageSnapshot);
+				this.events.onUsageChanged(record);
+				const projected = projectedContextSize(usageInfoFromSnapshot(lastUsageSnapshot));
+				if (projected > 0) this.events.onContextWarn(record, projected);
+			}
+
 			logger.log("turn complete", {
-				exitCode: result.exitCode,
-				stderrBytes: result.stderr.length,
+				stopReason,
+				failureError,
 				sawAssistantOutput,
 			});
 
@@ -580,18 +621,13 @@ export class TurnCoordinator {
 				return;
 			}
 
-			// TS doesn't narrow `let` mutated via closure; explicit cast.
-			const denial = permissionDenialEvent as { tool: string; reason: string } | null;
-			if (denial !== null && !controller.signal.aborted) {
-				// `permission_denials` from a `result` event only fires when a tool
-				// was blocked OUTSIDE the PreToolUse hook flow — i.e. by a settings
-				// `permissions.deny` rule (the configDir safety nets). Those are
-				// inviolable, so we surface a notice instead of asking the user to
-				// override, then fall through to normal completion.
-				const msg = `Tool "${denial.tool}" was blocked by a safety rule: ${denial.reason}`;
+			// `let` mutated in a closure doesn't narrow inside this scope.
+			const denialMessage = permissionDenialMessage as string | null;
+			if (denialMessage !== null && !controller.signal.aborted) {
+				const msg = `A tool was blocked by a safety rule: ${denialMessage}`;
 				new Notice(msg);
 				this.events.onSystemNotice(msg);
-				logger.warn("safety-rule denial", denial);
+				logger.warn("safety-rule denial", { reason: denialMessage });
 			}
 
 			if (lostSession && record.meta.id && !controller.signal.aborted) {
@@ -609,19 +645,20 @@ export class TurnCoordinator {
 			}
 
 			// Surface failures we'd otherwise swallow into Idle.
-			if (result.exitCode !== 0 || !sawAssistantOutput) {
-				const stderr = result.stderr.trim();
+			const failureSummary = failureError as string | null;
+			if (failureSummary !== null || !sawAssistantOutput) {
+				const stderr = stderrTail.trim();
 				if (!stderr && sawAssistantOutput) {
-					logger.warn("turn exited non-zero but rendered output", { exitCode: result.exitCode });
+					logger.warn("turn exited non-zero but rendered output");
 				} else {
-					const msg = stderr
-						? `Claude exited (${result.exitCode}): ${stderr.slice(-400)}`
-						: result.exitCode !== 0
-							? `Claude exited with code ${result.exitCode} and no output.`
+					const msg = failureSummary
+						? `Claude error: ${failureSummary}`
+						: stderr
+							? `Claude exited: ${stderr.slice(-400)}`
 							: "Claude returned no assistant message. Check the console with verbose logging on for details.";
 					new Notice(msg);
 					this.events.onSystemNotice(msg);
-					logger.warn("turn produced no assistant output", { exitCode: result.exitCode, stderr });
+					logger.warn("turn produced no assistant output", { failureSummary, stderr });
 				}
 			}
 
@@ -663,34 +700,6 @@ export class TurnCoordinator {
 		}
 	}
 
-	private composeSendOptions(
-		record: SessionRecord,
-		prompt: string,
-		signal: AbortSignal,
-		onEvent: (event: StreamEvent) => void,
-		permissionModeOverride?: PermissionMode,
-	): SendOptions {
-		const paths = resolvePaths(this.plugin);
-		const effectivePermissionMode = permissionModeOverride ?? this.plugin.settings.permissionMode;
-		return {
-			prompt,
-			cwd: paths.vaultRoot,
-			binaryPath: paths.binaryPath,
-			configDir: paths.configDir,
-			resumeSessionId: record.meta.id,
-			permissionMode: effectivePermissionMode,
-			model: this.plugin.settings.model || undefined,
-			systemPromptAddendum: this.plugin.settings.systemPromptAddendum || undefined,
-			settingsJson: buildSettingsJson({
-				permissionMode: effectivePermissionMode,
-				configDir: this.plugin.app.vault.configDir,
-				hookCommand: buildHookCommand(paths.hookScriptPath),
-			}),
-			signal,
-			onEvent,
-		};
-	}
-
 	private recordDiagnostic(record: SessionRecord, entry: DiagnosticEntry): void {
 		if (!record.diagnostics) record.diagnostics = [];
 		record.diagnostics.push(entry);
@@ -716,7 +725,10 @@ function toolMatchesList(list: string[], tool: string): boolean {
 	return false;
 }
 
-function accumulateUsage(record: SessionRecord, costUsd: number | undefined, usage: UsageInfo | undefined): void {
+function accumulateUsageFromSnapshot(
+	record: SessionRecord,
+	snapshot: Extract<NormalizedEvent, { type: "turn.usage" }>,
+): void {
 	if (!record.usage) {
 		record.usage = {
 			totalCostUsd: 0,
@@ -726,12 +738,28 @@ function accumulateUsage(record: SessionRecord, costUsd: number | undefined, usa
 			cacheCreationTokens: 0,
 		};
 	}
-	if (typeof costUsd === "number") record.usage.totalCostUsd += costUsd;
-	if (usage) {
-		record.usage.inputTokens += usage.input_tokens ?? 0;
-		record.usage.outputTokens += usage.output_tokens ?? 0;
-		record.usage.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
-		record.usage.cacheCreationTokens += usage.cache_creation_input_tokens ?? 0;
-	}
+	if (typeof snapshot.costUsd === "number")
+		record.usage.totalCostUsd += snapshot.costUsd;
+	record.usage.inputTokens += snapshot.inputTokens;
+	record.usage.outputTokens += snapshot.outputTokens;
+	if (typeof snapshot.cacheReadTokens === "number")
+		record.usage.cacheReadTokens += snapshot.cacheReadTokens;
+	if (typeof snapshot.cacheCreationTokens === "number")
+		record.usage.cacheCreationTokens += snapshot.cacheCreationTokens;
+}
+
+function usageInfoFromSnapshot(
+	s: Extract<NormalizedEvent, { type: "turn.usage" }>,
+): UsageInfo {
+	return {
+		input_tokens: s.inputTokens,
+		output_tokens: s.outputTokens,
+		...(typeof s.cacheReadTokens === "number" && {
+			cache_read_input_tokens: s.cacheReadTokens,
+		}),
+		...(typeof s.cacheCreationTokens === "number" && {
+			cache_creation_input_tokens: s.cacheCreationTokens,
+		}),
+	};
 }
 

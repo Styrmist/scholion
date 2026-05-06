@@ -7,9 +7,16 @@ import {
 	DEFAULT_MAX_TOOL_CALLS_PER_TURN,
 	DEFAULT_MODEL_CONTEXT_SIZE,
 } from "./constants";
+import type { BackendId } from "./backend/ids";
 import { PermissionMode, SendMethod, SessionMeta } from "./types";
 
 export interface PluginSettings {
+	/**
+	 * Backend that turns are dispatched to. Currently only `'claude-code'`
+	 * is registered; the picker UI is hidden until a second backend ships.
+	 * Persists silently so a future migration can flip it without prompting.
+	 */
+	defaultBackendId: BackendId;
 	model: string;
 	systemPromptAddendum: string;
 	allowedTools: string[];
@@ -39,6 +46,7 @@ export interface PluginSettings {
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
+	defaultBackendId: "claude-code",
 	model: "sonnet",
 	systemPromptAddendum: "",
 	allowedTools: [...DEFAULT_ALLOWED_TOOLS],

@@ -1,12 +1,12 @@
 import { FileSystemAdapter, ItemView, Notice, TFile, TFolder, WorkspaceLeaf } from "obsidian";
-import { resolvePaths } from "../binary/paths";
+import { resolvePaths } from "../providers/claude-code/binary/paths";
 import { MentionCandidate, parseMentions } from "../composer/mentions";
 import {
 	isKnownSlashCommandInvocation,
 	mergeWithBuiltins,
 	SlashCommand,
-} from "../composer/slashCommands";
-import { discoverSlashCommandsForVault } from "../composer/slashCommandsFs";
+} from "../providers/claude-code/slashCommands/frontmatter";
+import { discoverSlashCommandsForVault } from "../providers/claude-code/slashCommands/discover";
 import { captureActiveContext, CapturedContext, isMarkdownLike, truncate } from "../context/activeNote";
 import { buildPrompt, shouldAttach } from "../context/promptBuilder";
 import { VIEW_TYPE_CHAT, RIBBON_ICON } from "../constants";

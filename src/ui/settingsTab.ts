@@ -1,26 +1,16 @@
-import { existsSync, readFileSync } from "fs";
-import { join } from "path";
 import { App, Modal, Notice, PluginSettingTab, Setting } from "obsidian";
 import type ClaudeCodePlugin from "../main";
-import { resolvePaths } from "../binary/paths";
-import { LoginPhase } from "../cli/auth";
-import { McpServerEntry, parseMcpServers } from "../cli/mcpServers";
+import { resolvePaths } from "../providers/claude-code/binary/paths";
+import { LoginPhase } from "../providers/claude-code/auth";
+import { isMcpCapable } from "../backend/capabilities";
+import type { ModelInfo, ToolInfo } from "../backend/types";
 import { VIEW_TYPE_CHAT } from "../constants";
 import { SendMethod } from "../types";
 import { getElectronShell } from "../utils/electron";
 import { ChatView } from "./view";
 import { confirm } from "./confirmModal";
 
-const TOOL_OPTIONS = ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "WebFetch", "WebSearch", "Task"] as const;
-
-const MODEL_ALIASES: ReadonlyArray<{ value: string; label: string; desc: string }> = [
-	{ value: "sonnet", label: "sonnet", desc: "Latest Sonnet, everyday notes and writing" },
-	{ value: "opus", label: "opus", desc: "Latest Opus, complex reasoning" },
-	{ value: "haiku", label: "haiku", desc: "Fast / efficient, simple tasks" },
-	{ value: "opusplan", label: "opusplan", desc: "Opus while planning, Sonnet while executing" },
-];
 const CUSTOM_MODEL_VALUE = "__custom__";
-const KNOWN_MODEL_VALUES = new Set(MODEL_ALIASES.map((m) => m.value));
 
 export class ClaudeSettingsTab extends PluginSettingTab {
 	constructor(app: App, private plugin: ClaudeCodePlugin) {
@@ -44,45 +34,40 @@ export class ClaudeSettingsTab extends PluginSettingTab {
 	}
 
 	private renderMcpSection(containerEl: HTMLElement): void {
+		const backend = this.plugin.backend;
+		if (!isMcpCapable(backend)) return;
 		new Setting(containerEl).setName("Tool connectors").setHeading();
 
-		const paths = resolvePaths(this.plugin);
-		const userConfigPath = join(paths.configDir, ".claude.json");
-		const projectConfigPath = join(paths.vaultRoot, ".mcp.json");
-
-		const userServers = readMcpFromFile(userConfigPath, "mcpServers");
-		const projectServers = readMcpFromFile(projectConfigPath, "mcpServers");
-
-		const total = userServers.length + projectServers.length;
-		const desc = total === 0
-			? "No MCP servers configured. Add one with `claude mcp add` or by editing the config files below."
-			: `${total} configured. The plugin reads these read-only — edit the underlying file to add or remove servers.`;
-		new Setting(containerEl).setName("Status").setDesc(desc);
-
-		if (userServers.length > 0) {
-			containerEl.createEl("div", {
-				cls: "cc-settings__mcp-source",
-				text: `From ${userConfigPath}:`,
+		const status = new Setting(containerEl).setName("Status").setDesc("Loading…");
+		const listHost = containerEl.createDiv();
+		void backend
+			.listMcpServers()
+			.then((servers) => {
+				const total = servers.length;
+				status.setDesc(
+					total === 0
+						? "No MCP servers configured. Add one with `claude mcp add` or by editing the config files below."
+						: `${total} configured. The plugin reads these read-only — edit the underlying file to add or remove servers.`,
+				);
+				renderMcpList(listHost, servers);
+			})
+			.catch((err: unknown) => {
+				status.setDesc(`Could not list MCP servers: ${(err as Error).message}`);
 			});
-			renderMcpList(containerEl, userServers);
-		}
-		if (projectServers.length > 0) {
-			containerEl.createEl("div", {
-				cls: "cc-settings__mcp-source",
-				text: `From ${projectConfigPath} (project-level):`,
-			});
-			renderMcpList(containerEl, projectServers);
-		}
 
-		new Setting(containerEl)
-			.setName("Open config folder")
-			.setDesc("Reveals the user-level .claude.json directory in your file manager.")
-			.addButton((b) =>
-				b.setButtonText("Show").onClick(() => {
-					const shellApi = getElectronShell();
-					if (shellApi?.openPath) void shellApi.openPath(paths.configDir);
-				}),
-			);
+		// "Open config folder" is Claude-specific; gated by backend id.
+		if (backend.id() === "claude-code") {
+			const paths = resolvePaths(this.plugin);
+			new Setting(containerEl)
+				.setName("Open config folder")
+				.setDesc("Reveals the user-level .claude.json directory in your file manager.")
+				.addButton((b) =>
+					b.setButtonText("Show").onClick(() => {
+						const shellApi = getElectronShell();
+						if (shellApi?.openPath) void shellApi.openPath(paths.configDir);
+					}),
+				);
+		}
 	}
 
 	private renderRunawayGuardsSection(containerEl: HTMLElement): void {
@@ -186,28 +171,46 @@ export class ClaudeSettingsTab extends PluginSettingTab {
 			.setName("Authentication")
 			.setDesc("Loading…");
 
-		this.plugin.auth.isAuthenticated().then((ok) => {
-			const email = ok ? this.plugin.auth.getSignedInEmail() : null;
-			status.setDesc(ok ? (email ? `Signed in as ${email}.` : "Signed in.") : "Not signed in.");
-			status.controlEl.empty();
-			if (ok) {
-				const btn = status.controlEl.createEl("button", { text: "Sign out" });
-				btn.addEventListener("click", () => {
-					void (async () => {
-						await this.plugin.auth.logout();
-						new Notice("Signed out of Claude Code.");
-						this.display();
-					})();
-				});
-			} else {
-				const btn = status.controlEl.createEl("button", { text: "Sign in", cls: "mod-cta" });
-				btn.addEventListener("click", () => {
-					new LoginModal(this.app, this.plugin, () => this.display()).open();
-				});
-			}
-		}).catch((err: unknown) => {
-			status.setDesc(`Auth check failed: ${(err as Error).message}`);
-		});
+		this.plugin.backend
+			.authStatus()
+			.then((authStatus) => {
+				const ok = authStatus.state === "signed_in";
+				const email =
+					authStatus.state === "signed_in"
+						? authStatus.account?.email
+						: undefined;
+				status.setDesc(
+					ok
+						? email
+							? `Signed in as ${email}.`
+							: "Signed in."
+						: "Not signed in.",
+				);
+				status.controlEl.empty();
+				if (ok) {
+					const btn = status.controlEl.createEl("button", {
+						text: "Sign out",
+					});
+					btn.addEventListener("click", () => {
+						void (async () => {
+							await this.plugin.backend.signOut?.();
+							new Notice("Signed out of Claude Code.");
+							this.display();
+						})();
+					});
+				} else {
+					const btn = status.controlEl.createEl("button", {
+						text: "Sign in",
+						cls: "mod-cta",
+					});
+					btn.addEventListener("click", () => {
+						new LoginModal(this.app, this.plugin, () => this.display()).open();
+					});
+				}
+			})
+			.catch((err: unknown) => {
+				status.setDesc(`Auth check failed: ${(err as Error).message}`);
+			});
 	}
 
 	private renderBinarySection(containerEl: HTMLElement): void {
@@ -217,9 +220,13 @@ export class ClaudeSettingsTab extends PluginSettingTab {
 			.setName("Claude Code version")
 			.setDesc("Loading…");
 		const refresh = () => {
-			void this.plugin.installer.getInstalledVersion().then((current) => {
-				versionRow.setDesc(current ? `Installed: ${current}` : "Not installed.");
-			});
+			void this.plugin.backend
+				.version()
+				.then((current) =>
+					versionRow.setDesc(
+						current ? `Installed: ${current}` : "Not installed.",
+					),
+				);
 		};
 		refresh();
 
@@ -325,22 +332,26 @@ export class ClaudeSettingsTab extends PluginSettingTab {
 
 	private renderToolToggles(host: HTMLElement, key: "allowedTools" | "disallowedTools"): void {
 		host.empty();
-		for (const tool of TOOL_OPTIONS) {
-			const wrap = host.createDiv({ cls: "cc-settings__tool" });
-			const cb = wrap.createEl("input", { type: "checkbox" });
-			cb.checked = this.plugin.settings[key].includes(tool);
-			cb.addEventListener("change", () => {
-				const list = new Set(this.plugin.settings[key]);
-				if (cb.checked) list.add(tool); else list.delete(tool);
-				this.plugin.settings[key] = Array.from(list);
-				void this.plugin.saveSettings();
-				if (key === "allowedTools") {
-					const warningEl = host.parentElement?.querySelector<HTMLElement>(".cc-settings__warning");
-					if (warningEl) this.refreshBashWarning(warningEl);
-				}
-			});
-			wrap.createSpan({ text: ` ${tool}` });
-		}
+		void this.plugin.backend.availableTools().then((tools: ToolInfo[]) => {
+			host.empty();
+			for (const tool of tools) {
+				const wrap = host.createDiv({ cls: "cc-settings__tool" });
+				const cb = wrap.createEl("input", { type: "checkbox" });
+				cb.checked = this.plugin.settings[key].includes(tool.name);
+				cb.addEventListener("change", () => {
+					const list = new Set(this.plugin.settings[key]);
+					if (cb.checked) list.add(tool.name);
+					else list.delete(tool.name);
+					this.plugin.settings[key] = Array.from(list);
+					void this.plugin.saveSettings();
+					if (key === "allowedTools") {
+						const warningEl = host.parentElement?.querySelector<HTMLElement>(".cc-settings__warning");
+						if (warningEl) this.refreshBashWarning(warningEl);
+					}
+				});
+				wrap.createSpan({ text: ` ${tool.name}` });
+			}
+		});
 	}
 
 	private refreshBashWarning(host: HTMLElement): void {
@@ -356,23 +367,31 @@ export class ClaudeSettingsTab extends PluginSettingTab {
 		new Setting(containerEl).setName("Model & prompt").setHeading();
 
 		const current = this.plugin.settings.model;
-		const isKnown = KNOWN_MODEL_VALUES.has(current);
-		const initialDropdown = isKnown ? current : CUSTOM_MODEL_VALUE;
+		// Loaded async; until then render a single placeholder option that
+		// preserves the current selection so the picker doesn't jump.
+		let models: ModelInfo[] = [];
 
 		// Forward declarations so the dropdown handler can toggle the custom row.
 		let customRowEl: HTMLElement | null = null;
 		let customInput: HTMLInputElement | null = null;
 
-		new Setting(containerEl)
+		const modelSetting = new Setting(containerEl)
 			.setName("Model")
-			.setDesc("Pick a built-in alias or choose custom to enter a full model name.")
-			.addDropdown((d) => {
-				for (const alias of MODEL_ALIASES) {
-					const label = alias.desc ? `${alias.label} — ${alias.desc}` : alias.label;
-					d.addOption(alias.value, label);
+			.setDesc("Pick a built-in alias or choose custom to enter a full model name.");
+
+		modelSetting.addDropdown((d) => {
+			const populate = () => {
+				const knownIds = new Set(models.map((m) => m.id));
+				const isKnown = knownIds.has(current);
+				const initial = isKnown ? current : CUSTOM_MODEL_VALUE;
+				for (const m of models) {
+					const label = m.description
+						? `${m.displayName} — ${m.description}`
+						: m.displayName;
+					d.addOption(m.id, label);
 				}
 				d.addOption(CUSTOM_MODEL_VALUE, "Custom…");
-				d.setValue(initialDropdown).onChange(async (value) => {
+				d.setValue(initial).onChange(async (value) => {
 					if (value === CUSTOM_MODEL_VALUE) {
 						customRowEl?.removeClass("cc-hidden");
 						customInput?.focus();
@@ -382,7 +401,13 @@ export class ClaudeSettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					}
 				});
+				customRowEl?.toggleClass("cc-hidden", isKnown);
+			};
+			void this.plugin.backend.availableModels().then((m) => {
+				models = m;
+				populate();
 			});
+		});
 
 		const customRow = new Setting(containerEl)
 			.setName("Custom model")
@@ -390,14 +415,15 @@ export class ClaudeSettingsTab extends PluginSettingTab {
 			.addText((t) => {
 				customInput = t.inputEl;
 				t.setPlaceholder("Model name")
-					.setValue(isKnown ? "" : current)
+					.setValue(current)
 					.onChange(async (value) => {
 						this.plugin.settings.model = value.trim();
 						await this.plugin.saveSettings();
 					});
 			});
 		customRowEl = customRow.settingEl;
-		customRowEl.toggleClass("cc-hidden", isKnown);
+		// Visibility settled by populate() once availableModels resolves.
+		customRowEl.addClass("cc-hidden");
 
 		new Setting(containerEl)
 			.setName("System prompt addendum")
@@ -603,16 +629,11 @@ class LoginModal extends Modal {
 	}
 }
 
-function readMcpFromFile(path: string, _block: string): McpServerEntry[] {
-	if (!existsSync(path)) return [];
-	try {
-		return parseMcpServers(readFileSync(path, "utf8"));
-	} catch {
-		return [];
-	}
-}
-
-function renderMcpList(container: HTMLElement, servers: McpServerEntry[]): void {
+function renderMcpList(
+	container: HTMLElement,
+	servers: import("../backend/capabilities").McpServerInfo[],
+): void {
+	container.empty();
 	const list = container.createDiv({ cls: "cc-settings__mcp-list" });
 	for (const server of servers) {
 		const row = list.createDiv({ cls: "cc-settings__mcp-row" });
@@ -625,6 +646,9 @@ function renderMcpList(container: HTMLElement, servers: McpServerEntry[]): void 
 		if (server.disabled) {
 			head.createSpan({ cls: "cc-settings__mcp-disabled", text: "disabled" });
 		}
-		row.createDiv({ cls: "cc-settings__mcp-summary", text: server.summary });
+		row.createDiv({
+			cls: "cc-settings__mcp-summary",
+			text: server.summary ?? "",
+		});
 	}
 }

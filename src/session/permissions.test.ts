@@ -28,8 +28,8 @@ describe("applyDecision", () => {
 		expect(out.allowedTools).toEqual([]);
 	});
 
-	it("'once' / 'session' / 'global' add to allowedTools and remove from deniedTools", () => {
-		for (const decision of ["once", "session", "global"] as const) {
+	it("'allowOnce' / 'allowSession' / 'allowAlways' add to allowedTools and remove from deniedTools", () => {
+		for (const decision of ["allowOnce", "allowSession", "allowAlways"] as const) {
 			const out = applyDecision(grants([], ["Edit"]), "Edit", decision);
 			expect(out.allowedTools).toEqual(["Edit"]);
 			expect(out.deniedTools).toEqual([]);
@@ -37,7 +37,7 @@ describe("applyDecision", () => {
 	});
 
 	it("does not duplicate when allowing an already-allowed tool", () => {
-		const out = applyDecision(grants(["Read"]), "Read", "session");
+		const out = applyDecision(grants(["Read"]), "Read", "allowSession");
 		expect(out.allowedTools).toEqual(["Read"]);
 	});
 
@@ -48,7 +48,7 @@ describe("applyDecision", () => {
 
 	it("toggling deny → allow → deny ends in a deniedTools entry", () => {
 		const a = applyDecision(grants(), "Edit", "deny");
-		const b = applyDecision(a, "Edit", "session");
+		const b = applyDecision(a, "Edit", "allowSession");
 		const c = applyDecision(b, "Edit", "deny");
 		expect(c.deniedTools).toEqual(["Edit"]);
 		expect(c.allowedTools).toEqual([]);
@@ -67,13 +67,13 @@ describe("applyDecision", () => {
 	it("preserves lastAttached", () => {
 		const before = grants(["Edit"]);
 		before.lastAttached = { path: "n.md", contentHash: "h", kind: "note" };
-		const out = applyDecision(before, "Bash", "session");
+		const out = applyDecision(before, "Bash", "allowSession");
 		expect(out.lastAttached).toBe(before.lastAttached);
 	});
 
 	it("idempotent: applying the same decision twice produces equal output", () => {
-		const a = applyDecision(grants([], ["Edit"]), "Edit", "session");
-		const b = applyDecision(a, "Edit", "session");
+		const a = applyDecision(grants([], ["Edit"]), "Edit", "allowSession");
+		const b = applyDecision(a, "Edit", "allowSession");
 		expect(b).toEqual(a);
 	});
 });

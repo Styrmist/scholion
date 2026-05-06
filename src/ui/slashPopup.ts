@@ -1,4 +1,4 @@
-import type { SlashCommand } from "../composer/slashCommands";
+import type { SlashCommand } from "../providers/claude-code/slashCommands/frontmatter";
 
 export interface SlashPopupOptions {
 	onPick: (command: SlashCommand) => void;

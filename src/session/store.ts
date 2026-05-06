@@ -2,7 +2,7 @@ import { randomBytes } from "crypto";
 import { existsSync, promises as fsp, renameSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import type ClaudeCodePlugin from "../main";
-import { resolvePaths } from "../binary/paths";
+import { resolvePaths } from "../providers/claude-code/binary/paths";
 import { SESSION_SAVE_DEBOUNCE_MS } from "../constants";
 import { ChatTurn, DiagnosticEntry, PermissionGrants, SessionMeta, SessionUsage } from "../types";
 import { atomicWriteJson, ensureDir, readJsonIfExists } from "../utils/fs";
