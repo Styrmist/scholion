@@ -38,6 +38,25 @@ Carryover items from the v0.1.0 implementation review and post-MVP smoke testing
 ## Architectural
 
 - [ ] *Deferred.* **Extract `TurnCoordinator` from [src/ui/view.ts](src/ui/view.ts).** ChatView is now ~570 lines. Splitting `runTurn`/`handleInlineDenial`/`handlePermissionDecision`/`abortCurrent` into a dedicated coordinator class would consolidate the `currentRecord !== turnRecord` race guards and the `pendingPermission` state machine. Pure refactor, no user-visible change — revisit if/when the file makes a real change painful.
+
+## Multi-provider facade — deferred
+
+Tracked from the 0.13.0 facade extraction (see `docs/superpowers/specs/2026-05-06-multi-provider-backend-facade-design.md` and `src/providers/README.md`).
+
+- [ ] **Wire `Backend.diagnostics()` AsyncIterable**: today the hot path is `SendTurnRequest.onDiagnostic` callback; the AsyncIterable on the interface is a no-op pass-through. Stitch so cross-turn diagnostics streaming works without coordinator involvement.
+- [ ] **Rewrite [`src/ui/transcript.ts`](src/ui/transcript.ts) to consume `NormalizedEvent` directly**. Today routed through [`src/session/transcriptEventAdapter.ts`](src/session/transcriptEventAdapter.ts) to preserve behavior. Remove the adapter once transcript switches.
+- [ ] **MCP add/remove UI**: `McpCapable.addMcpServer` / `removeMcpServer` exist on the interface; ClaudeCodeBackend throws "not implemented in v1". Settings tab still read-only.
+- [ ] **Reasoning config UI**: `setReasoningConfig` is a no-op; expose a setting once UX is decided.
+- [ ] **Plan-mode exit prompt**: `resolvePlanModeExit` throws; UI does not yet render the "approve / keep planning" dialog when `ExitPlanMode` tool fires.
+- [ ] **Subagent discovery**: `listSubAgents` returns `[]`; should walk `.claude/agents/*.md`.
+- [ ] **Compaction trigger**: `triggerCompaction` throws (Claude manages internally). Other backends may surface a button.
+- [ ] **Reasoning signature verification**: `verifyReasoningBlock` returns `true`. Wire to the actual signature check when reasoning UI lands.
+- [ ] **Backend selector**: hidden until ≥2 backends ship. When the second backend ships, expose `defaultBackendId` in the settings tab.
+- [ ] **Native session id leak audit**: `record.meta.id` is double-written by the Claude backend during transition (Leak C). Migrate UI off it (replace the `!record.meta.id` checks in [`src/ui/view.ts`](src/ui/view.ts) with `await backend.hasNativeContext(...)`), then drop the double-write.
+- [ ] **`BinaryNotInstalledError` lives in the provider tree** but is caught by the coordinator. Move to a non-provider module (`src/backend/errors.ts`) or expose a generic "needs install" notice path.
+- [ ] **`SessionStore` reads `resolvePaths(plugin).sessionsDir`** which is sourced from the Claude binary paths. Sessions are vault-level, not provider-level — paths.sessionsDir should move to a provider-neutral helper.
+- [ ] **`SlashCommand` types are imported by UI directly** from `src/providers/claude-code/slashCommands/frontmatter`. Surface a provider-neutral shape on `Backend.discoverSlashCommands` (already returns `SlashCommandInfo`); migrate UI to consume that.
+- [ ] **`turnCoordinator` permission flow still calls `plugin.hookServer.respond`** for cycle-cap and abort releases. Migrate to `backend.resolvePermission` once it accepts a reason field, or expose a low-level `Backend.releasePermission(reqId, decision, reason)` method.
 - [ ] *Deferred.* **Index `toolCards` and `toolBlocks` by id.** `toolCards` is already a `Map` in `TranscriptView`. `toolBlocks` is walked linearly via `findToolBlock`/`findToolBlockGlobal`, but the hot path (`applyToolResult` in transcript) only walks the current turn (typically 1–10 blocks); the cold paths (permission decisions, abort) run on rare interactive events. Re-evaluate when sessions in the wild start exceeding ~10k tool calls.
 - [x] **Persist `lastTurnSummary` for the picker.** Populated from the first sentence (≤140 chars, sentence-boundary aware) of the last assistant turn after each `runTurn` completes; rendered as a 2-line clamp under the title in the SuggestModal.
 
