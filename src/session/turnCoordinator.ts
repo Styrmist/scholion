@@ -1,5 +1,5 @@
 import { Notice } from "obsidian";
-import { BinaryNotInstalledError } from "../binary/installer";
+import { BinaryNotInstalledError } from "../providers/claude-code/binary/installer";
 import { MAX_DIAGNOSTICS_PER_SESSION } from "../constants";
 import type { CapturedContext } from "../context/activeNote";
 import type ClaudeCodePlugin from "../main";
@@ -621,13 +621,13 @@ export class TurnCoordinator {
 				return;
 			}
 
-			if (permissionDenialMessage !== null && !controller.signal.aborted) {
-				// Surface safety-rule denials (set in deny rules outside the hook flow)
-				// as a system notice but otherwise complete normally.
-				const msg = `A tool was blocked by a safety rule: ${permissionDenialMessage}`;
+			// `let` mutated in a closure doesn't narrow inside this scope.
+			const denialMessage = permissionDenialMessage as string | null;
+			if (denialMessage !== null && !controller.signal.aborted) {
+				const msg = `A tool was blocked by a safety rule: ${denialMessage}`;
 				new Notice(msg);
 				this.events.onSystemNotice(msg);
-				logger.warn("safety-rule denial", { reason: permissionDenialMessage });
+				logger.warn("safety-rule denial", { reason: denialMessage });
 			}
 
 			if (lostSession && record.meta.id && !controller.signal.aborted) {
@@ -645,19 +645,20 @@ export class TurnCoordinator {
 			}
 
 			// Surface failures we'd otherwise swallow into Idle.
-			if (failureError !== null || !sawAssistantOutput) {
+			const failureSummary = failureError as string | null;
+			if (failureSummary !== null || !sawAssistantOutput) {
 				const stderr = stderrTail.trim();
 				if (!stderr && sawAssistantOutput) {
 					logger.warn("turn exited non-zero but rendered output");
 				} else {
-					const msg = failureError
-						? `Claude error: ${failureError}`
+					const msg = failureSummary
+						? `Claude error: ${failureSummary}`
 						: stderr
 							? `Claude exited: ${stderr.slice(-400)}`
 							: "Claude returned no assistant message. Check the console with verbose logging on for details.";
 					new Notice(msg);
 					this.events.onSystemNotice(msg);
-					logger.warn("turn produced no assistant output", { failureError, stderr });
+					logger.warn("turn produced no assistant output", { failureSummary, stderr });
 				}
 			}
 

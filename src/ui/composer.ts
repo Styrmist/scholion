@@ -1,6 +1,6 @@
 import { App, Scope, setIcon } from "obsidian";
 import { detectMentionQuery, MentionCandidate, rankMentionCandidates } from "../composer/mentions";
-import { detectSlashQuery, rankCommands, SlashCommand } from "../composer/slashCommands";
+import { detectSlashQuery, rankCommands, SlashCommand } from "../providers/claude-code/slashCommands/frontmatter";
 import { CapturedContext } from "../context/activeNote";
 import { SendMethod } from "../types";
 import { formatBytes } from "../utils/format";

@@ -1,7 +1,7 @@
 import { App, Modal, Notice, PluginSettingTab, Setting } from "obsidian";
 import type ClaudeCodePlugin from "../main";
-import { resolvePaths } from "../binary/paths";
-import { LoginPhase } from "../cli/auth";
+import { resolvePaths } from "../providers/claude-code/binary/paths";
+import { LoginPhase } from "../providers/claude-code/auth";
 import { isMcpCapable } from "../backend/capabilities";
 import type { ModelInfo, ToolInfo } from "../backend/types";
 import { VIEW_TYPE_CHAT } from "../constants";

@@ -19,7 +19,7 @@ import { SessionMeta } from "../types";
 
 let mockSessionsDir = "/unset";
 
-vi.mock("../binary/paths", () => ({
+vi.mock("../providers/claude-code/binary/paths", () => ({
 	resolvePaths: () => ({
 		sessionsDir: mockSessionsDir,
 		// Other fields are not consulted by SessionStore.
