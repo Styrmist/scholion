@@ -3,6 +3,7 @@ import {
 	BUILTIN_COMMANDS,
 	commandNameFromPath,
 	detectSlashQuery,
+	isKnownSlashCommandInvocation,
 	mergeWithBuiltins,
 	parseCommandFrontmatter,
 	rankCommands,
@@ -220,6 +221,53 @@ describe("mergeWithBuiltins", () => {
 
 	it("returns an empty list for an empty fs list and empty builtins arg", () => {
 		expect(mergeWithBuiltins([], [])).toEqual([]);
+	});
+});
+
+describe("isKnownSlashCommandInvocation", () => {
+	const known = new Set(["cost", "compact", "review", "git:fixup"]);
+
+	it("returns the command name when text starts with /<known>", () => {
+		expect(isKnownSlashCommandInvocation("/cost", known)).toBe("cost");
+		expect(isKnownSlashCommandInvocation("/compact", known)).toBe("compact");
+	});
+
+	it("returns the command name when /<known> is followed by arguments", () => {
+		expect(isKnownSlashCommandInvocation("/review HEAD~3", known)).toBe("review");
+		expect(isKnownSlashCommandInvocation("/cost --details", known)).toBe("cost");
+	});
+
+	it("supports namespaced command names with colon", () => {
+		expect(isKnownSlashCommandInvocation("/git:fixup abc123", known)).toBe("git:fixup");
+	});
+
+	it("returns null for unknown commands", () => {
+		expect(isKnownSlashCommandInvocation("/randmm", known)).toBeNull();
+		expect(isKnownSlashCommandInvocation("/typo with args", known)).toBeNull();
+	});
+
+	it("returns null when the slash isn't at the start of the message", () => {
+		expect(isKnownSlashCommandInvocation(" /cost", known)).toBeNull();
+		expect(isKnownSlashCommandInvocation("hi /cost", known)).toBeNull();
+	});
+
+	it("returns null when there's no name after the slash", () => {
+		expect(isKnownSlashCommandInvocation("/", known)).toBeNull();
+		expect(isKnownSlashCommandInvocation("/ cost", known)).toBeNull();
+	});
+
+	it("returns null when the slash is followed by punctuation", () => {
+		expect(isKnownSlashCommandInvocation("/!cost", known)).toBeNull();
+		expect(isKnownSlashCommandInvocation("/.cost", known)).toBeNull();
+	});
+
+	it("does not match when the name has extra letters not in known", () => {
+		expect(isKnownSlashCommandInvocation("/costabc", known)).toBeNull();
+		expect(isKnownSlashCommandInvocation("/costx args", known)).toBeNull();
+	});
+
+	it("returns null for an empty known-set even on valid syntax", () => {
+		expect(isKnownSlashCommandInvocation("/cost", new Set())).toBeNull();
 	});
 });
 

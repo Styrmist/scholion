@@ -1,7 +1,11 @@
 import { FileSystemAdapter, ItemView, Notice, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { resolvePaths } from "../binary/paths";
 import { MentionCandidate, parseMentions } from "../composer/mentions";
-import { mergeWithBuiltins, SlashCommand } from "../composer/slashCommands";
+import {
+	isKnownSlashCommandInvocation,
+	mergeWithBuiltins,
+	SlashCommand,
+} from "../composer/slashCommands";
 import { discoverSlashCommandsForVault } from "../composer/slashCommandsFs";
 import { captureActiveContext, CapturedContext, isMarkdownLike, truncate } from "../context/activeNote";
 import { buildPrompt, shouldAttach } from "../context/promptBuilder";
@@ -332,22 +336,36 @@ export class ChatView extends ItemView {
 		const guardOk = await this.runCostGuardCheck(record);
 		if (!guardOk) return;
 
-		const context = attachContext ? this.currentTurnContext : null;
+		// If the user is invoking a known slash command, send the message raw
+		// (no `<user_message>` wrapping, no context attachments). The CLI
+		// only intercepts slash commands when the message starts with
+		// `/<name>` literally — wrapping kills interception and the message
+		// gets forwarded to Claude as plain text instead.
+		const knownNames = new Set(this.slashCommandsCache.map((c) => c.name));
+		const isSlashInvocation = this.plugin.settings.enableSlashCommands
+			&& isKnownSlashCommandInvocation(text, knownNames) !== null;
+
+		const context = !isSlashInvocation && attachContext ? this.currentTurnContext : null;
 		const previousHash = record.permissions.lastAttached?.contentHash;
 		const willAttach = context !== null && shouldAttach(context, previousHash);
 		const finalContext = willAttach ? context : null;
-		const mentions = await this.materializeMentions(text, finalContext?.path ?? null);
+		const mentions = isSlashInvocation
+			? []
+			: await this.materializeMentions(text, finalContext?.path ?? null);
 		// Forked sessions include their inherited transcript on the first new
 		// turn only — once the CLI hands us a session id we stop re-sending it.
-		const inheritedConversation = this.shouldIncludeInheritedConversation(record)
+		// Slash commands skip this too: they're meta-actions, not conversation.
+		const inheritedConversation = !isSlashInvocation && this.shouldIncludeInheritedConversation(record)
 			? serializeInheritedTurns(record.turns.slice(0, record.forkedFromTurns ?? 0))
 			: undefined;
-		const prompt = buildPrompt({
-			userText: text,
-			context: finalContext,
-			mentions,
-			inheritedConversation,
-		});
+		const prompt = isSlashInvocation
+			? text
+			: buildPrompt({
+				userText: text,
+				context: finalContext,
+				mentions,
+				inheritedConversation,
+			});
 
 		const userTurn: ChatTurn = {
 			role: "user",

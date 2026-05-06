@@ -175,6 +175,29 @@ export const BUILTIN_COMMANDS: ReadonlyArray<SlashCommand> = [
 ];
 
 /**
+ * Return the command name (no leading slash) if the message is a slash-command
+ * invocation matching one of `knownNames`, else null. Used by the chat
+ * pipeline to decide whether to bypass the `<user_message>` prompt wrapper —
+ * the CLI only intercepts slash commands when the message starts with
+ * `/<name>` literally, so wrapping kills interception.
+ *
+ * Matching only against *known* names (built-ins + discovered) keeps a typo
+ * like `/randmm` from accidentally skipping the wrapping; in that case the
+ * popup wouldn't have offered the command anyway, so the user clearly
+ * intended a regular message starting with a slash.
+ */
+export function isKnownSlashCommandInvocation(
+	text: string,
+	knownNames: ReadonlySet<string>,
+): string | null {
+	const match = text.match(/^\/([A-Za-z0-9_\-:]+)(?:\s|$)/);
+	if (!match) return null;
+	const name = match[1] ?? "";
+	if (!name || !knownNames.has(name)) return null;
+	return name;
+}
+
+/**
  * Merge filesystem-discovered commands with the curated built-in list.
  * Project/user commands shadow built-ins on name collision so a user can
  * override e.g. `/review` with their own template. Filesystem ordering is
