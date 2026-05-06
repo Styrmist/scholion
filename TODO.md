@@ -69,3 +69,4 @@ Deferred from the system-temp IPC migration ([src/permissions/hookServer.ts](src
 - [ ] Prepare some CLAUDE.md/AGENTS.md to optimise assistant usage
 - [ ] select between current claude code approach (donwloaded separate copy) vs preinstalled by user
 - [ ] Auto-get model context window size, show it's fullness and give user ability to compact it + auto-compact on some percentage.
+- [ ] Investigate how replying to old conversations is implemented
