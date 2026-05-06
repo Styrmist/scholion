@@ -471,6 +471,12 @@
 	background: var(--interactive-accent-translucent, var(--background-modifier-border));
 }
 
+.cc-slash-popup__source--builtin {
+	background: var(--background-modifier-border);
+	color: var(--text-faint);
+	font-style: italic;
+}
+
 .cc-composer__input {
 	width: 100%;
 	min-height: 60px;

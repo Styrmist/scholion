@@ -1,7 +1,7 @@
 import { FileSystemAdapter, ItemView, Notice, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { resolvePaths } from "../binary/paths";
 import { MentionCandidate, parseMentions } from "../composer/mentions";
-import { SlashCommand } from "../composer/slashCommands";
+import { mergeWithBuiltins, SlashCommand } from "../composer/slashCommands";
 import { discoverSlashCommandsForVault } from "../composer/slashCommandsFs";
 import { captureActiveContext, CapturedContext, isMarkdownLike, truncate } from "../context/activeNote";
 import { buildPrompt, shouldAttach } from "../context/promptBuilder";
@@ -539,12 +539,13 @@ export class ChatView extends ItemView {
 		try {
 			const adapter = this.app.vault.adapter;
 			const vaultRoot = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : null;
-			if (!vaultRoot) return;
-			const commands = await discoverSlashCommandsForVault(vaultRoot);
-			this.slashCommandsCache = commands;
+			let fsCommands: SlashCommand[] = [];
+			if (vaultRoot) {
+				try { fsCommands = await discoverSlashCommandsForVault(vaultRoot); } catch { /* best-effort */ }
+			}
+			// Built-ins always show, even when fs discovery is empty or fails.
+			this.slashCommandsCache = mergeWithBuiltins(fsCommands);
 			this.slashCommandsCacheAt = Date.now();
-		} catch {
-			// Discovery is best-effort; absence of commands is the normal first-run state.
 		} finally {
 			this.slashCommandsRefreshing = false;
 		}

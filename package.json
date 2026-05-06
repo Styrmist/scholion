@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-claude-code",
-	"version": "0.12.0",
+	"version": "0.12.1",
 	"description": "Obsidian plugin that runs Claude Code in the sidebar with subscription auth.",
 	"main": "main.js",
 	"type": "module",

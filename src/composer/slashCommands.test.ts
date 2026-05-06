@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+	BUILTIN_COMMANDS,
 	commandNameFromPath,
 	detectSlashQuery,
+	mergeWithBuiltins,
 	parseCommandFrontmatter,
 	rankCommands,
 	SlashCommand,
@@ -141,6 +143,83 @@ describe("rankCommands", () => {
 
 	it("is case-insensitive", () => {
 		expect(rankCommands(candidates, "REVIEW", 10).map((c) => c.name)).toContain("review");
+	});
+});
+
+describe("BUILTIN_COMMANDS", () => {
+	it("contains the curated set verified empirically against the bundled CLI", () => {
+		const names = BUILTIN_COMMANDS.map((c) => c.name).sort();
+		expect(names).toEqual(["clear", "compact", "cost", "init", "review"]);
+	});
+
+	it("flags every entry as source: builtin", () => {
+		for (const cmd of BUILTIN_COMMANDS) {
+			expect(cmd.source).toBe("builtin");
+			expect(cmd.description).toBeTruthy();
+		}
+	});
+
+	it("does not include 'isn't available in this environment' commands", () => {
+		const names = new Set(BUILTIN_COMMANDS.map((c) => c.name));
+		for (const interactiveOnly of ["model", "agents", "skills", "settings", "login", "plugin", "mcp", "bug", "permissions", "exit", "quit", "doctor", "status", "memory"]) {
+			expect(names.has(interactiveOnly)).toBe(false);
+		}
+	});
+});
+
+describe("mergeWithBuiltins", () => {
+	const fsProject: SlashCommand = { name: "review", source: "project", path: "review.md", description: "project version" };
+	const fsUser: SlashCommand = { name: "deploy", source: "user", path: "deploy.md" };
+	const builtin: SlashCommand = { name: "cost", source: "builtin", path: "<builtin>", description: "show cost" };
+
+	it("appends built-ins after filesystem commands when names don't collide", () => {
+		const got = mergeWithBuiltins([fsUser], [builtin]);
+		expect(got.map((c) => c.name)).toEqual(["deploy", "cost"]);
+	});
+
+	it("filesystem command shadows a built-in of the same name", () => {
+		const got = mergeWithBuiltins([fsProject], [{ name: "review", source: "builtin", path: "<builtin>" }]);
+		expect(got.length).toBe(1);
+		expect(got[0]!.source).toBe("project");
+		expect(got[0]!.description).toBe("project version");
+	});
+
+	it("preserves the filesystem ordering verbatim", () => {
+		const fs: SlashCommand[] = [
+			{ name: "z", source: "project", path: "z.md" },
+			{ name: "a", source: "user", path: "a.md" },
+		];
+		const got = mergeWithBuiltins(fs, []);
+		expect(got.map((c) => c.name)).toEqual(["z", "a"]);
+	});
+
+	it("preserves the built-in declared order at the tail", () => {
+		const builtins: SlashCommand[] = [
+			{ name: "alpha", source: "builtin", path: "<builtin>" },
+			{ name: "beta", source: "builtin", path: "<builtin>" },
+			{ name: "gamma", source: "builtin", path: "<builtin>" },
+		];
+		const got = mergeWithBuiltins([], builtins);
+		expect(got.map((c) => c.name)).toEqual(["alpha", "beta", "gamma"]);
+	});
+
+	it("dedups within the built-in list itself (defensive — should never happen but guards against regressions)", () => {
+		const dupes: SlashCommand[] = [
+			{ name: "x", source: "builtin", path: "<builtin>", description: "first" },
+			{ name: "x", source: "builtin", path: "<builtin>", description: "second" },
+		];
+		const got = mergeWithBuiltins([], dupes);
+		expect(got.length).toBe(1);
+		expect(got[0]!.description).toBe("first");
+	});
+
+	it("uses BUILTIN_COMMANDS by default when no second arg is given", () => {
+		const got = mergeWithBuiltins([]);
+		expect(got.map((c) => c.name)).toEqual(BUILTIN_COMMANDS.map((c) => c.name));
+	});
+
+	it("returns an empty list for an empty fs list and empty builtins arg", () => {
+		expect(mergeWithBuiltins([], [])).toEqual([]);
 	});
 });
 

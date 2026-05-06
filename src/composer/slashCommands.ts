@@ -17,7 +17,7 @@
  * `slashCommandsFs.ts` and consumes the pure parser here.
  */
 
-export type SlashCommandSource = "project" | "user";
+export type SlashCommandSource = "project" | "user" | "builtin";
 
 export interface SlashCommand {
 	/** Command name without the leading slash. May be `namespace:name`. */
@@ -148,4 +148,53 @@ export function commandNameFromPath(relativePath: string): string {
 	const sansExt = trimmed.replace(/\.md$/i, "");
 	if (!sansExt) return "";
 	return sansExt.split(/[/\\]+/).filter(Boolean).join(":");
+}
+
+/**
+ * Curated list of CLI built-in slash commands that work in `-p` mode (the
+ * mode the plugin uses). Verified empirically against CLI 2.1.126:
+ *
+ *   - `/cost`     returns subscription/usage info
+ *   - `/clear`    clears active session (--resume context)
+ *   - `/compact`  compacts conversation history (--resume context)
+ *   - `/init`     initializes CLAUDE.md (works inside a project root)
+ *   - `/review`   reviews the current diff (needs a git context)
+ *
+ * Most other built-ins (`/model`, `/agents`, `/skills`, `/settings`,
+ * `/login`, `/plugin`, `/mcp`, etc.) report "isn't available in this
+ * environment" under `-p` and are deliberately omitted — surfacing them
+ * would just disappoint. Re-test against newer CLI versions when bumping
+ * the bundled binary.
+ */
+export const BUILTIN_COMMANDS: ReadonlyArray<SlashCommand> = [
+	{ name: "cost", description: "Show subscription / usage info", source: "builtin", path: "<builtin>" },
+	{ name: "compact", description: "Compact the conversation to free context (active session)", source: "builtin", path: "<builtin>" },
+	{ name: "clear", description: "Clear the active session (or use 'New chat' in the picker)", source: "builtin", path: "<builtin>" },
+	{ name: "init", description: "Initialize a CLAUDE.md for the current project", source: "builtin", path: "<builtin>" },
+	{ name: "review", description: "Review the current diff (requires a git repository)", source: "builtin", path: "<builtin>" },
+];
+
+/**
+ * Merge filesystem-discovered commands with the curated built-in list.
+ * Project/user commands shadow built-ins on name collision so a user can
+ * override e.g. `/review` with their own template. Filesystem ordering is
+ * preserved; built-ins are appended in their declared order at the end.
+ */
+export function mergeWithBuiltins(
+	fsCommands: ReadonlyArray<SlashCommand>,
+	builtins: ReadonlyArray<SlashCommand> = BUILTIN_COMMANDS,
+): SlashCommand[] {
+	const seen = new Set<string>();
+	const out: SlashCommand[] = [];
+	for (const cmd of fsCommands) {
+		if (seen.has(cmd.name)) continue;
+		seen.add(cmd.name);
+		out.push(cmd);
+	}
+	for (const cmd of builtins) {
+		if (seen.has(cmd.name)) continue;
+		seen.add(cmd.name);
+		out.push(cmd);
+	}
+	return out;
 }
