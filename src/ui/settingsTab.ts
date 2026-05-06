@@ -459,6 +459,18 @@ export class ClaudeSettingsTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Slash-command palette")
+			.setDesc(
+				"Type / at the start of a line to autocomplete custom commands from .claude/commands/ in your vault root or home directory. The CLI expands the command body server-side at send time.",
+			)
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.enableSlashCommands).onChange(async (value) => {
+					this.plugin.settings.enableSlashCommands = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
 			.setName("Prefer selection when present")
 			.setDesc("Attach only the selected text instead of the whole note when there's a selection.")
 			.addToggle((t) =>

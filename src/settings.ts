@@ -29,6 +29,8 @@ export interface PluginSettings {
 	maxToolCallsPerTurn: number;
 	/** When true, the composer offers `@`-mention autocomplete and resolves `@[[Name]]` references at send time. */
 	enableMentions: boolean;
+	/** When true, the composer offers slash-command autocomplete from `.claude/commands/` trees. */
+	enableSlashCommands: boolean;
 	/** Tokens. Total context window of the active model. 0 disables the context-warn check. */
 	modelContextSize: number;
 	/** Percent of the context window at which to fire a one-shot warning. 0 disables. */
@@ -52,6 +54,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 	costHardCapUsd: DEFAULT_COST_HARD_CAP_USD,
 	maxToolCallsPerTurn: DEFAULT_MAX_TOOL_CALLS_PER_TURN,
 	enableMentions: true,
+	enableSlashCommands: true,
 	modelContextSize: DEFAULT_MODEL_CONTEXT_SIZE,
 	contextWarnPercent: DEFAULT_CONTEXT_WARN_PERCENT,
 	sessions: [],

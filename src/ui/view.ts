@@ -1,6 +1,8 @@
-import { ItemView, Notice, TFile, TFolder, WorkspaceLeaf } from "obsidian";
+import { FileSystemAdapter, ItemView, Notice, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import { resolvePaths } from "../binary/paths";
 import { MentionCandidate, parseMentions } from "../composer/mentions";
+import { SlashCommand } from "../composer/slashCommands";
+import { discoverSlashCommandsForVault } from "../composer/slashCommandsFs";
 import { captureActiveContext, CapturedContext, isMarkdownLike, truncate } from "../context/activeNote";
 import { buildPrompt, shouldAttach } from "../context/promptBuilder";
 import { VIEW_TYPE_CHAT, RIBBON_ICON } from "../constants";
@@ -69,6 +71,12 @@ export class ChatView extends ItemView {
 	private planModeOn = false;
 	/** Tracks whether the current in-flight turn was started in plan mode, so handleTurnFinished knows to reset the toggle. */
 	private currentTurnUsedPlanMode = false;
+	/** In-memory snapshot of `.claude/commands/` discovery, refreshed lazily. */
+	private slashCommandsCache: SlashCommand[] = [];
+	/** Timestamp the cache was last refreshed. 0 = never. */
+	private slashCommandsCacheAt = 0;
+	/** True while a refresh is already inflight (we don't want to thrash on rapid keystrokes). */
+	private slashCommandsRefreshing = false;
 
 	constructor(leaf: WorkspaceLeaf, private plugin: ClaudeCodePlugin) {
 		super(leaf);
@@ -114,6 +122,8 @@ export class ChatView extends ItemView {
 			getSendMethod: () => this.plugin.settings.sendMethod,
 			getMentionCandidates: () => this.collectMentionCandidates(),
 			isMentionsEnabled: () => this.plugin.settings.enableMentions,
+			getSlashCommandCandidates: () => this.collectSlashCommandCandidates(),
+			isSlashCommandsEnabled: () => this.plugin.settings.enableSlashCommands,
 			onTogglePlanMode: () => { this.planModeOn = !this.planModeOn; },
 			isPlanModeOn: () => this.planModeOn,
 		});
@@ -157,6 +167,9 @@ export class ChatView extends ItemView {
 		);
 
 		await this.refreshContext();
+		// Kick off a background slash-command discovery so the popup has data
+		// the first time the user types `/`. Cheap and best-effort.
+		void this.refreshSlashCommandsCache();
 		await this.startNewChat();
 	}
 
@@ -504,6 +517,37 @@ export class ChatView extends ItemView {
 		const files = this.app.vault.getMarkdownFiles();
 		files.sort((a, b) => (b.stat?.mtime ?? 0) - (a.stat?.mtime ?? 0));
 		return files.map((f) => ({ basename: f.basename, path: f.path }));
+	}
+
+	/**
+	 * Returns the cached slash-command snapshot synchronously and kicks off
+	 * a background refresh if the cache is older than 30s. The composer
+	 * polls this on every keystroke; doing the I/O lazily (and never on the
+	 * hot path) keeps typing snappy even on slow disks.
+	 */
+	private collectSlashCommandCandidates(): SlashCommand[] {
+		const SLASH_CACHE_TTL_MS = 30_000;
+		if (Date.now() - this.slashCommandsCacheAt > SLASH_CACHE_TTL_MS) {
+			void this.refreshSlashCommandsCache();
+		}
+		return this.slashCommandsCache;
+	}
+
+	private async refreshSlashCommandsCache(): Promise<void> {
+		if (this.slashCommandsRefreshing) return;
+		this.slashCommandsRefreshing = true;
+		try {
+			const adapter = this.app.vault.adapter;
+			const vaultRoot = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : null;
+			if (!vaultRoot) return;
+			const commands = await discoverSlashCommandsForVault(vaultRoot);
+			this.slashCommandsCache = commands;
+			this.slashCommandsCacheAt = Date.now();
+		} catch {
+			// Discovery is best-effort; absence of commands is the normal first-run state.
+		} finally {
+			this.slashCommandsRefreshing = false;
+		}
 	}
 
 	/**
